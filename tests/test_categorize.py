@@ -31,10 +31,13 @@ async def test_categorize_intents_cancellation(sample_intents, cancellation_exam
         assert results.get(intent_text) == True, f"Failed to identify cancellation intent: {intent_text}"
 
 @pytest.mark.asyncio
-async def test_categorize_intents_billing(sample_intents, billing_examples):
+async def test_categorize_intents_billing(sample_intents, billing_examples, llm_debug):
     """Test categorization of billing intents."""
     
-    categorizer = Categorizer(api_key=os.getenv('GEMINI_API_KEY'))
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
     
     results = await categorizer.categorize_intents(
         intents=sample_intents,
@@ -55,11 +58,14 @@ async def test_categorize_intents_billing(sample_intents, billing_examples):
         assert results.get(intent_text) == True, f"Failed to identify billing intent: {intent_text}"
 
 @pytest.mark.asyncio
-async def test_categorize_intents_error_handling(sample_intents, cancellation_examples):
+async def test_categorize_intents_error_handling(sample_intents, cancellation_examples, llm_debug):
     """Test error handling in intent categorization."""
     
     # Create categorizer with invalid API key
-    categorizer = Categorizer(api_key="invalid_key")
+    categorizer = Categorizer(
+        api_key="invalid_key",
+        debug=llm_debug
+    )
     
     # Should handle error gracefully and return False for all intents
     results = await categorizer.categorize_intents(
@@ -72,10 +78,13 @@ async def test_categorize_intents_error_handling(sample_intents, cancellation_ex
     assert all(not value for value in results.values())
 
 @pytest.mark.asyncio
-async def test_categorize_intents_empty_inputs():
+async def test_categorize_intents_empty_inputs(llm_debug):
     """Test handling of empty inputs."""
     
-    categorizer = Categorizer(api_key=os.getenv('GEMINI_API_KEY'))
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
     
     # Test with empty intents list
     results = await categorizer.categorize_intents(

@@ -44,4 +44,4 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def llm_debug(request):
-    return request.config.getoption("--llm-debug") 
+    return request.config.getoption("--llm-debug")
