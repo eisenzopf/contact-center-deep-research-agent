@@ -12,7 +12,8 @@ class LLMInterface:
                  api_key: Optional[str] = None,
                  model_name: str = 'gemini-2.0-flash',
                  max_retries: int = 3,
-                 retry_delay: float = 1.0):
+                 retry_delay: float = 1.0,
+                 debug: bool = False):
         """
         Initialize LLM interface.
         
@@ -21,7 +22,9 @@ class LLMInterface:
             model_name: Name of the model to use
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
+            debug: Whether to print debug information
         """
+        self.debug = debug
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
             raise ValueError("API key must be provided or set in environment")
@@ -88,10 +91,21 @@ class LLMInterface:
             **kwargs
         }
         
+        if self.debug:
+            print("\n=== LLM Request ===")
+            print(prompt)
+            print("\n=== Generation Config ===")
+            print(generation_config)
+        
         response = self.model.generate_content(
             prompt,
             generation_config=generation_config
         )
+        
+        if self.debug:
+            print("\n=== Raw LLM Response ===")
+            print(response.text)
+            print("================\n")
         
         self._log_request()
         return response
@@ -104,10 +118,15 @@ class LLMInterface:
             response_text = response_text.rsplit('\n', 1)[0]
             response_text = response_text.replace('```json\n', '').replace('```', '')
         
+        # Additional cleaning for potential JSON formatting
+        response_text = response_text.strip()
+        if response_text.startswith('['):
+            response_text = '{"classifications": ' + response_text + '}'
+        
         try:
             return json.loads(response_text)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse JSON response: {e}")
+            raise ValueError(f"Failed to parse JSON response: {e}\nResponse text: {response_text}")
     
     def _validate_response(self,
                          response: Dict[str, Any],
