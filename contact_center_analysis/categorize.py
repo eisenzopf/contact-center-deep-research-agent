@@ -4,7 +4,7 @@ from .base import BaseAnalyzer
 class Categorizer(BaseAnalyzer):
     """Categorize and classify conversation elements."""
     
-    async def categorize_intents(self, intents: List[Dict[str, str]], target_category: str, examples: List[str]) -> Dict[str, bool]:
+    async def categorize_intents(self, intents: List[Dict[str, str]], target_category: str, examples: List[str], batch_size: int = 200) -> Dict[str, bool]:
         """
         Categorize intents based on their similarity to provided examples.
         
@@ -12,6 +12,7 @@ class Categorizer(BaseAnalyzer):
             intents: List of intent dictionaries with 'name' field
             target_category: Name of the category being classified (e.g. "cancellation", "billing", etc.)
             examples: List of example intents that represent the target category
+            batch_size: Number of intents to process in each batch (default=200)
             
         Returns:
             Dictionary mapping intent names to boolean classification
@@ -33,7 +34,6 @@ Classify the following intents:"""
         classified_intents = {}
         
         # Process intents in batches
-        batch_size = 20  # Can be adjusted as needed
         for i in range(0, len(intents), batch_size):
             batch = intents[i:i + batch_size]
             batch_prompt = classification_task_description + "\n\n"

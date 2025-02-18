@@ -2,6 +2,7 @@ import pytest
 from contact_center_analysis import Categorizer
 import os
 
+@pytest.mark.llm_debug
 @pytest.mark.asyncio
 async def test_categorize_intents_cancellation(sample_intents, cancellation_examples, llm_debug):
     """Test categorization of cancellation intents."""
@@ -30,6 +31,7 @@ async def test_categorize_intents_cancellation(sample_intents, cancellation_exam
     for intent_text in cancellation_texts:
         assert results.get(intent_text) == True, f"Failed to identify cancellation intent: {intent_text}"
 
+@pytest.mark.llm_debug
 @pytest.mark.asyncio
 async def test_categorize_intents_billing(sample_intents, billing_examples, llm_debug):
     """Test categorization of billing intents."""
@@ -57,6 +59,7 @@ async def test_categorize_intents_billing(sample_intents, billing_examples, llm_
     for intent_text in billing_texts:
         assert results.get(intent_text) == True, f"Failed to identify billing intent: {intent_text}"
 
+@pytest.mark.llm_debug
 @pytest.mark.asyncio
 async def test_categorize_intents_error_handling(sample_intents, cancellation_examples, llm_debug):
     """Test error handling in intent categorization."""
@@ -77,6 +80,7 @@ async def test_categorize_intents_error_handling(sample_intents, cancellation_ex
     assert len(results) == len(sample_intents)
     assert all(not value for value in results.values())
 
+@pytest.mark.llm_debug
 @pytest.mark.asyncio
 async def test_categorize_intents_empty_inputs(llm_debug):
     """Test handling of empty inputs."""
@@ -100,4 +104,11 @@ async def test_categorize_intents_empty_inputs(llm_debug):
         target_category="cancellation",
         examples=[]
     )
-    assert len(results) == 1 
+    assert len(results) == 1
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_debug_flag(llm_debug):
+    """Test that debug flag is properly set."""
+    print(f"\nDebug flag value: {llm_debug}")
+    assert llm_debug is True, "Debug flag should be True when --llm-debug is used" 

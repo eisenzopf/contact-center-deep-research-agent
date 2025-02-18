@@ -4,6 +4,7 @@ import json
 import os
 import asyncio
 from datetime import datetime
+import logging
 
 class LLMInterface:
     """Interface for handling LLM interactions."""
@@ -25,6 +26,9 @@ class LLMInterface:
             debug: Whether to print debug information
         """
         self.debug = debug
+        if debug:
+            logging.basicConfig(level=logging.DEBUG)
+        self.logger = logging.getLogger(__name__)
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
             raise ValueError("API key must be provided or set in environment")
@@ -59,6 +63,13 @@ class LLMInterface:
         """
         await self._check_rate_limit()
         
+        if self.debug:
+            self.logger.debug("\n=== Starting LLM Request ===")
+            self.logger.debug(f"Prompt: {prompt}")
+            self.logger.debug(f"Expected Format: {expected_format}")
+            self.logger.debug(f"Temperature: {temperature}")
+            self.logger.debug(f"Additional kwargs: {kwargs}")
+        
         for attempt in range(self.max_retries):
             try:
                 response = await self._make_request(
@@ -67,14 +78,24 @@ class LLMInterface:
                     **kwargs
                 )
                 
+                if self.debug:
+                    self.logger.debug("\n=== Parsing Response ===")
+                    self.logger.debug(f"Raw Response: {response.text}")
+                
                 parsed_response = self._parse_response(response.text)
                 
                 if expected_format:
+                    if self.debug:
+                        self.logger.debug("\n=== Validating Response ===")
+                        self.logger.debug(f"Parsed Response: {parsed_response}")
                     self._validate_response(parsed_response, expected_format)
                     
                 return parsed_response
                 
             except Exception as e:
+                if self.debug:
+                    self.logger.debug(f"\n=== Error on attempt {attempt + 1}/{self.max_retries} ===")
+                    self.logger.debug(f"Error: {str(e)}")
                 if attempt == self.max_retries - 1:
                     raise
                 await asyncio.sleep(self.retry_delay * (attempt + 1))
@@ -92,10 +113,10 @@ class LLMInterface:
         }
         
         if self.debug:
-            print("\n=== LLM Request ===")
-            print(prompt)
-            print("\n=== Generation Config ===")
-            print(generation_config)
+            self.logger.debug("\n=== LLM Request ===")
+            self.logger.debug(prompt)
+            self.logger.debug("\n=== Generation Config ===")
+            self.logger.debug(generation_config)
         
         response = self.model.generate_content(
             prompt,
@@ -103,9 +124,9 @@ class LLMInterface:
         )
         
         if self.debug:
-            print("\n=== Raw LLM Response ===")
-            print(response.text)
-            print("================\n")
+            self.logger.debug("\n=== Raw LLM Response ===")
+            self.logger.debug(response.text)
+            self.logger.debug("================\n")
         
         self._log_request()
         return response

@@ -42,6 +42,16 @@ def pytest_addoption(parser):
         help="show LLM input and output"
     )
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "llm_debug: mark test to show LLM input/output"
+    )
+
 @pytest.fixture
 def llm_debug(request):
-    return request.config.getoption("--llm-debug")
+    """Debug fixture for LLM tests."""
+    has_marker = request.node.get_closest_marker('llm_debug') is not None
+    has_option = request.config.getoption('--llm-debug')
+    debug_enabled = has_marker or has_option
+    print(f"\nLLM Debug Status: marker={has_marker}, option={has_option}, enabled={debug_enabled}")
+    return debug_enabled

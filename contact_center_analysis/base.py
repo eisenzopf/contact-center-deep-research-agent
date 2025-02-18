@@ -16,17 +16,24 @@ class BaseAnalyzer:
             model_name: Name of Gemini model to use
             debug: Whether to enable LLM debugging
         """
-        self.llm = LLMInterface(api_key=api_key, model_name=model_name, debug=debug)
+        self.debug = debug  # Store debug setting
+        self.llm = LLMInterface(
+            api_key=api_key, 
+            model_name=model_name, 
+            debug=debug  # Pass debug flag to LLMInterface
+        )
 
     async def _generate_content(self, 
                               prompt: str, 
                               expected_format: Optional[Dict[str, Any]] = None,
                               **kwargs) -> Dict[str, Any]:
         """Generate content from LLM with validation."""
-        print("\n=== LLM Input ===")
-        print(prompt)
-        print("\n=== Expected Format ===")
-        print(expected_format)
+        # Only print debug info if debug is enabled
+        if self.debug:
+            print("\n=== LLM Input ===")
+            print(prompt)
+            print("\n=== Expected Format ===")
+            print(expected_format)
         
         response = await self.llm.generate_response(
             prompt,
@@ -34,8 +41,10 @@ class BaseAnalyzer:
             **kwargs
         )
         
-        print("\n=== LLM Response ===")
-        print(response)
-        print("================\n")
+        # Only print debug info if debug is enabled
+        if self.debug:
+            print("\n=== LLM Response ===")
+            print(response)
+            print("================\n")
         
         return response 
