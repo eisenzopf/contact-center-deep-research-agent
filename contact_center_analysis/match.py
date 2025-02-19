@@ -1,53 +1,124 @@
 from typing import List, Dict, Any, Tuple, Optional
 from .base import BaseAnalyzer
+import json
 
-class Matcher(BaseAnalyzer):
-    """Match and compare text content using semantic similarity."""
+class AttributeMatcher(BaseAnalyzer):
+    """Match and compare attributes using semantic similarity."""
     
     async def find_matches(self,
-                         query: str,
-                         candidates: List[str],
-                         top_k: int = 1,
-                         threshold: float = 0.7) -> List[Dict[str, Any]]:
-        """Find semantic matches for a query string from a list of candidates.
-
-        Args:
-            query: The string to match against
-            candidates: List of potential matches
-            top_k: Number of top matches to return
-            threshold: Minimum similarity score (0-1) to consider a match
-
-        Returns:
-            List of dicts containing match info (text, score, rank)
+                          required_attributes: List[Dict[str, Any]],
+                          available_attributes: List[Dict[str, Any]],
+                          batch_size: int = 200,
+                          confidence_threshold: float = 0.7) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
         """
-        prompt = f"""Compare the semantic similarity between the query and each candidate.
+        Match required attributes against available attributes to identify matches and gaps.
         
-Query: "{query}"
-
-Candidates:
-{self._format_candidates(candidates)}
-
-Return JSON with matches above {threshold} similarity, including:
-- text: The matching candidate text
-- score: Similarity score (0-1)
-- rank: Ranking position
-- rationale: Brief explanation of the semantic relationship
-
-Sort by similarity score descending. Return at most {top_k} matches."""
-
-        response = await self._generate_content(
-            prompt,
-            expected_format={
-                "matches": [{
-                    "text": str,
-                    "score": float,
-                    "rank": int,
-                    "rationale": str
-                }]
-            }
-        )
+        Args:
+            required_attributes: List of RequiredAttribute objects from text.py
+            available_attributes: List of existing database attributes
+            batch_size: Number of comparisons to process in each batch
+            confidence_threshold: Minimum confidence score to consider a match
         
-        return response["matches"]
+        Returns:
+            tuple(dict, list): (matches mapping required->available, missing attributes)
+        """
+        matches = {}
+        missing_attributes = []
+
+        # Process in batches to avoid overwhelming the LLM
+        for i in range(0, len(required_attributes), batch_size):
+            batch = required_attributes[i:i + batch_size]
+            
+            prompt = """Compare required attributes against available attributes to identify matches.
+
+Required Attributes:"""
+            
+            # Add required attributes to prompt
+            for attr in batch:
+                prompt += f"""
+
+{attr['field_name']}:
+- Title: {attr['title']}
+- Description: {attr['description']}"""
+
+            prompt += """
+
+Available Database Attributes:"""
+
+            # Add available attributes to prompt
+            for attr in available_attributes:
+                description = json.loads(attr['description'])
+                prompt += f"""
+
+{attr['name']}:
+- Title: {description['title']}
+- Description: {description['description']}"""
+
+            prompt += """
+
+Return a JSON object with this structure (ensure no trailing commas):
+{
+    "matches": [
+        {
+            "required_field": str,         # Required attribute's field_name
+            "matching_attributes": [{       # List of matching available attributes
+                "available_field": str,     # Available attribute's name
+                "confidence": float         # Match confidence score 0-1
+            }]
+        }
+    ]
+}
+
+For each required attribute, identify if any available attributes capture the same information.
+Consider:
+1. Field names and titles
+2. Descriptions and purposes
+3. Semantic meaning
+4. Type of information captured
+
+Note: Ensure the JSON response is properly formatted with no trailing commas."""
+
+            try:
+                response = await self._generate_content(
+                    prompt,
+                    expected_format={
+                        "matches": [{
+                            "required_field": str,
+                            "matching_attributes": [{
+                                "available_field": str,
+                                "confidence": float
+                            }]
+                        }]
+                    }
+                )
+
+                # Process matches
+                for match in response["matches"]:
+                    required_field = match['required_field']
+                    best_match = None
+                    best_confidence = 0
+
+                    # Find best matching attribute
+                    for attr_match in match['matching_attributes']:
+                        if attr_match['confidence'] > best_confidence:
+                            best_confidence = attr_match['confidence']
+                            best_match = attr_match['available_field']
+
+                    if best_match and best_confidence > confidence_threshold:
+                        matches[required_field] = best_match
+                    else:
+                        missing_attributes.append(next(
+                            attr for attr in batch 
+                            if attr['field_name'] == required_field
+                        ))
+
+            except Exception as e:
+                if self.debug:
+                    print(f"Error processing batch: {e}")
+                # If error, consider all attributes in batch as missing
+                missing_attributes.extend(batch)
+
+        return matches, missing_attributes
 
     async def group_by_similarity(self,
                                 items: List[str],

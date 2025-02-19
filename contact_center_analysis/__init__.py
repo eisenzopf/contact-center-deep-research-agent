@@ -4,7 +4,7 @@ from .recommend import RecommendationEngine
 from .categorize import Categorizer
 from .review import Reviewer
 from .plan import Planner
-from .match import Matcher
+from .match import AttributeMatcher
 from .text import TextGenerator
 
 __all__ = [
@@ -14,6 +14,6 @@ __all__ = [
     'Categorizer',
     'Reviewer',
     'Planner',
-    'Matcher',
+    'AttributeMatcher',
     'TextGenerator'
 ] 
