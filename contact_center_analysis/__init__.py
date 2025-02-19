@@ -5,6 +5,7 @@ from .categorize import Categorizer
 from .review import Reviewer
 from .plan import Planner
 from .match import Matcher
+from .text import TextGenerator
 
 __all__ = [
     'QuestionGenerator',
@@ -13,5 +14,6 @@ __all__ = [
     'Categorizer',
     'Reviewer',
     'Planner',
-    'Matcher'
+    'Matcher',
+    'TextGenerator'
 ] 
