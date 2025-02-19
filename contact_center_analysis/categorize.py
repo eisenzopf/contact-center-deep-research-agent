@@ -1,35 +1,33 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .base import BaseAnalyzer
 
 class Categorizer(BaseAnalyzer):
     """Categorize and classify conversation elements."""
     
-    async def categorize_intents(self, intents: List[Dict[str, str]], target_category: str, examples: List[str], batch_size: int = 200) -> Dict[str, bool]:
+    async def is_in_class(self, intents: List[Dict[str, str]], target_class: str, examples: Optional[List[str]] = None, batch_size: int = 200) -> Dict[str, bool]:
         """
-        Categorize intents based on their similarity to provided examples.
+        Determine if intents belong to a specified class based on optional examples.
         
         Args:
             intents: List of intent dictionaries with 'name' field
-            target_category: Name of the category being classified (e.g. "cancellation", "billing", etc.)
-            examples: List of example intents that represent the target category
+            target_class: Name of the class being classified (e.g. "cancellation", "billing", etc.)
+            examples: Optional list of example intents that represent the target class
             batch_size: Number of intents to process in each batch (default=200)
             
         Returns:
             Dictionary mapping intent names to boolean classification
         """
-        # Format examples into bullet points
-        example_bullets = "\n".join(f"- {example}" for example in examples)
-        
-        classification_task_description = f"""Analyze each intent text and classify if it represents a {target_category} request.
+        classification_task_description = f"""Analyze each intent text and classify if it represents a {target_class} request.
 
 Use this JSON schema:
-IntentClassification = {{'intent': str, 'is_match': bool}}
-Return: list[IntentClassification]
+IntentClassification = {{"intent": str, "is_match": bool}}
+Return: list[IntentClassification]"""
 
-Examples of {target_category} intents:
-{example_bullets}
+        if examples:
+            example_bullets = "\n".join(f"- {example}" for example in examples)
+            classification_task_description += f"\n\nExamples of {target_class} intents:\n{example_bullets}"
 
-Classify the following intents:"""
+        classification_task_description += "\n\nClassify the following intents:"
 
         classified_intents = {}
         

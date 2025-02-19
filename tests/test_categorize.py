@@ -4,17 +4,17 @@ import os
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
-async def test_categorize_intents_cancellation(sample_intents, cancellation_examples, llm_debug):
-    """Test categorization of cancellation intents."""
+async def test_is_in_class_cancellation(sample_intents, cancellation_examples, llm_debug):
+    """Test classification of cancellation intents."""
     
     categorizer = Categorizer(
         api_key=os.getenv('GEMINI_API_KEY'),
         debug=llm_debug
     )
     
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=sample_intents,
-        target_category="cancellation",
+        target_class="cancellation",
         examples=cancellation_examples
     )
     
@@ -33,17 +33,17 @@ async def test_categorize_intents_cancellation(sample_intents, cancellation_exam
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
-async def test_categorize_intents_billing(sample_intents, billing_examples, llm_debug):
-    """Test categorization of billing intents."""
+async def test_is_in_class_billing(sample_intents, billing_examples, llm_debug):
+    """Test classification of billing intents."""
     
     categorizer = Categorizer(
         api_key=os.getenv('GEMINI_API_KEY'),
         debug=llm_debug
     )
     
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=sample_intents,
-        target_category="billing",
+        target_class="billing",
         examples=billing_examples
     )
     
@@ -61,8 +61,25 @@ async def test_categorize_intents_billing(sample_intents, billing_examples, llm_
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
-async def test_categorize_intents_error_handling(sample_intents, cancellation_examples, llm_debug):
-    """Test error handling in intent categorization."""
+async def test_is_in_class_without_examples(sample_intents, llm_debug):
+    """Test classification without providing examples."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    results = await categorizer.is_in_class(
+        intents=sample_intents,
+        target_class="cancellation"
+    )
+    
+    assert len(results) == len(sample_intents)
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_is_in_class_error_handling(sample_intents, cancellation_examples, llm_debug):
+    """Test error handling in intent classification."""
     
     # Create categorizer with invalid API key
     categorizer = Categorizer(
@@ -71,9 +88,9 @@ async def test_categorize_intents_error_handling(sample_intents, cancellation_ex
     )
     
     # Should handle error gracefully and return False for all intents
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=sample_intents,
-        target_category="cancellation",
+        target_class="cancellation",
         examples=cancellation_examples
     )
     
@@ -82,7 +99,7 @@ async def test_categorize_intents_error_handling(sample_intents, cancellation_ex
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
-async def test_categorize_intents_empty_inputs(llm_debug):
+async def test_is_in_class_empty_inputs(llm_debug):
     """Test handling of empty inputs."""
     
     categorizer = Categorizer(
@@ -91,17 +108,17 @@ async def test_categorize_intents_empty_inputs(llm_debug):
     )
     
     # Test with empty intents list
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=[],
-        target_category="cancellation",
+        target_class="cancellation",
         examples=["cancel subscription"]
     )
     assert len(results) == 0
     
     # Test with empty examples list
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=[{"name": "test intent"}],
-        target_category="cancellation",
+        target_class="cancellation",
         examples=[]
     )
     assert len(results) == 1
@@ -110,7 +127,6 @@ async def test_categorize_intents_empty_inputs(llm_debug):
 @pytest.mark.asyncio
 async def test_debug_flag(llm_debug):
     """Test that debug flag is properly set."""
-    print(f"\nDebug flag value: {llm_debug}")
     assert llm_debug is True, "Debug flag should be True when --llm-debug is used"
 
 @pytest.mark.llm_debug
@@ -125,9 +141,9 @@ async def test_single_cancellation_intent(cancellation_examples, llm_debug):
     
     single_intent = [{"name": "cancel my subscription please"}]
     
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=single_intent,
-        target_category="cancellation",
+        target_class="cancellation",
         examples=cancellation_examples
     )
     
@@ -146,9 +162,9 @@ async def test_single_billing_intent(billing_examples, llm_debug):
     
     single_intent = [{"name": "billing question about invoice"}]
     
-    results = await categorizer.categorize_intents(
+    results = await categorizer.is_in_class(
         intents=single_intent,
-        target_category="billing",
+        target_class="billing",
         examples=billing_examples
     )
     

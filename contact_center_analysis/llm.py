@@ -51,36 +51,17 @@ class LLMInterface:
                               **kwargs) -> Dict[str, Any]:
         """
         Generate a response from the LLM with retry logic and validation.
-        
-        Args:
-            prompt: The prompt to send to the LLM
-            expected_format: Expected JSON schema for validation
-            temperature: Temperature for generation (0.0-1.0)
-            **kwargs: Additional generation parameters
-            
-        Returns:
-            Parsed response as dictionary
         """
         await self._check_rate_limit()
-        
-        if self.debug:
-            self.logger.debug("\n=== Starting LLM Request ===")
-            self.logger.debug(f"Prompt: {prompt}")
-            self.logger.debug(f"Expected Format: {expected_format}")
-            self.logger.debug(f"Temperature: {temperature}")
-            self.logger.debug(f"Additional kwargs: {kwargs}")
         
         for attempt in range(self.max_retries):
             try:
                 response = await self._make_request(
                     prompt,
+                    expected_format=expected_format,
                     temperature=temperature,
                     **kwargs
                 )
-                
-                if self.debug:
-                    self.logger.debug("\n=== Parsing Response ===")
-                    self.logger.debug(f"Raw Response: {response.text}")
                 
                 parsed_response = self._parse_response(response.text)
                 
@@ -102,6 +83,7 @@ class LLMInterface:
     
     async def _make_request(self,
                           prompt: str,
+                          expected_format: Optional[Dict[str, Any]] = None,
                           **kwargs) -> Any:
         """Make the actual request to the LLM."""
         generation_config = {
@@ -114,9 +96,9 @@ class LLMInterface:
         
         if self.debug:
             self.logger.debug("\n=== LLM Request ===")
-            self.logger.debug(prompt)
-            self.logger.debug("\n=== Generation Config ===")
-            self.logger.debug(generation_config)
+            self.logger.debug(f"Prompt: {prompt}")
+            self.logger.debug(f"Expected Format: {expected_format}")
+            self.logger.debug(f"Generation Config: {generation_config}")
         
         response = self.model.generate_content(
             prompt,
