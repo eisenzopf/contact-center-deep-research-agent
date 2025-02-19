@@ -111,4 +111,46 @@ async def test_categorize_intents_empty_inputs(llm_debug):
 async def test_debug_flag(llm_debug):
     """Test that debug flag is properly set."""
     print(f"\nDebug flag value: {llm_debug}")
-    assert llm_debug is True, "Debug flag should be True when --llm-debug is used" 
+    assert llm_debug is True, "Debug flag should be True when --llm-debug is used"
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_single_cancellation_intent(cancellation_examples, llm_debug):
+    """Test categorization of a single cancellation intent."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    single_intent = [{"name": "cancel my subscription please"}]
+    
+    results = await categorizer.categorize_intents(
+        intents=single_intent,
+        target_category="cancellation",
+        examples=cancellation_examples
+    )
+    
+    assert len(results) == 1
+    assert results.get("cancel my subscription please") == True
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_single_billing_intent(billing_examples, llm_debug):
+    """Test categorization of a single billing intent."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    single_intent = [{"name": "billing question about invoice"}]
+    
+    results = await categorizer.categorize_intents(
+        intents=single_intent,
+        target_category="billing",
+        examples=billing_examples
+    )
+    
+    assert len(results) == 1
+    assert results.get("billing question about invoice") == True 
