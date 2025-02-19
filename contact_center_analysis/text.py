@@ -63,4 +63,62 @@ Ensure the response is a valid JSON object with an 'attributes' array containing
             }
         )
         
+        return response
+
+    async def generate_attribute(
+        self,
+        text: str,
+        attribute: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """
+        Generate a value for a specific attribute based on text input.
+        
+        Args:
+            text: The input text to analyze
+            attribute: Dictionary containing attribute definition with fields:
+                      - field_name: attribute name
+                      - title: Human readable title
+                      - description: Detailed description
+                      - rationale: Why this attribute is needed
+                      
+        Returns:
+            Dictionary containing:
+            - value: Generated value for the attribute
+            - confidence: Confidence score (0-1)
+            - explanation: Explanation of how the value was determined
+        """
+        # Handle empty text case explicitly
+        if not text.strip():
+            return {
+                "value": "No content",
+                "confidence": 0.0,
+                "explanation": "No content was provided for analysis. The text input was empty."
+            }
+
+        prompt = f"""Analyze this text to determine the value for the following attribute:
+
+Attribute: {attribute['title']}
+Description: {attribute['description']}
+
+Text to analyze:
+{text}
+
+Return a JSON object with this structure:
+{{
+    "value": str,           # The extracted or determined value
+    "confidence": float,    # Confidence score between 0 and 1
+    "explanation": str      # Explanation of how the value was determined
+}}
+
+Ensure the response is specific to the attribute definition and supported by the text content."""
+
+        response = await self._generate_content(
+            prompt,
+            expected_format={
+                "value": str,
+                "confidence": float,
+                "explanation": str
+            }
+        )
+        
         return response 
