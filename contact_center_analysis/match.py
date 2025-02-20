@@ -5,18 +5,21 @@ import json
 class AttributeMatcher(BaseAnalyzer):
     """Match and compare attributes using semantic similarity."""
     
-    async def find_matches(self,
-                          required_attributes: List[Dict[str, Any]],
-                          available_attributes: List[Dict[str, Any]],
-                          batch_size: int = 200,
-                          confidence_threshold: float = 0.7) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
+    async def find_matches(
+        self,
+        required_attributes: List[Dict[str, Any]],
+        available_attributes: List[Dict[str, Any]],
+        batch_size: Optional[int] = None,
+        confidence_threshold: float = 0.7
+    ) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
         """
         Match required attributes against available attributes to identify matches and gaps.
         
         Args:
             required_attributes: List of RequiredAttribute objects from text.py
             available_attributes: List of existing database attributes
-            batch_size: Number of comparisons to process in each batch
+            batch_size: Optional number of comparisons to process in each batch.
+                       If not provided, defaults to 200
             confidence_threshold: Minimum confidence score to consider a match
         
         Returns:
@@ -24,10 +27,11 @@ class AttributeMatcher(BaseAnalyzer):
         """
         matches = {}
         missing_attributes = []
+        effective_batch_size = batch_size or 200
 
         # Process in batches to avoid overwhelming the LLM
-        for i in range(0, len(required_attributes), batch_size):
-            batch = required_attributes[i:i + batch_size]
+        for i in range(0, len(required_attributes), effective_batch_size):
+            batch = required_attributes[i:i + effective_batch_size]
             
             prompt = """Compare required attributes against available attributes to identify matches.
 
@@ -167,7 +171,7 @@ Each group should have:
         self,
         required_attributes: List[Dict[str, Any]],
         available_attributes: List[Dict[str, Any]],
-        batch_size: int = 10,
+        batch_size: Optional[int] = None,
         confidence_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
         """
@@ -176,17 +180,19 @@ Each group should have:
         Args:
             required_attributes: List of required attributes to match
             available_attributes: List of available attributes to match against
-            batch_size: Number of comparisons to process in each batch (default: 10)
+            batch_size: Optional number of comparisons to process in each batch.
+                       If not provided, defaults to 10
             confidence_threshold: Minimum confidence score to consider a match
             
         Returns:
             List of match results for each required attribute
         """
         results = []
+        effective_batch_size = batch_size or 10
         
         # Process required attributes in batches
-        for i in range(0, len(required_attributes), batch_size):
-            batch = required_attributes[i:i + batch_size]
+        for i in range(0, len(required_attributes), effective_batch_size):
+            batch = required_attributes[i:i + effective_batch_size]
             batch_prompt = """Compare these required attributes with available attributes to find matches.
 
 Available Attributes:

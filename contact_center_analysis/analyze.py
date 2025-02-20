@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .base import BaseAnalyzer
 import json
 
@@ -26,7 +26,7 @@ class DataAnalyzer(BaseAnalyzer):
         self,
         attribute_values: Dict[str, Any],
         questions: List[str],
-        batch_size: int = 10
+        batch_size: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Analyze findings from attribute extraction.
@@ -34,11 +34,14 @@ class DataAnalyzer(BaseAnalyzer):
         Args:
             attribute_values: Dictionary of extracted attribute values
             questions: List of research questions to answer
-            batch_size: Number of items to process in each batch (default: 10)
+            batch_size: Optional number of items to process in each batch.
+                       If not provided, defaults to 10
             
         Returns:
             Analysis results and answers to research questions
         """
+        effective_batch_size = batch_size or 10
+        
         prompt = f"""Based on the analysis of customer service conversations, help answer these questions:
 
 Questions:
@@ -70,18 +73,21 @@ Format as JSON:
     async def analyze_retention_strategies(
         self,
         analysis_results: Dict[str, Any],
-        batch_size: int = 10
+        batch_size: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Generate retention strategy recommendations based on analysis.
         
         Args:
             analysis_results: Results from previous analysis
-            batch_size: Number of items to process in each batch (default: 10)
+            batch_size: Optional number of items to process in each batch.
+                       If not provided, defaults to 10
             
         Returns:
             Dictionary containing recommended strategies
         """
+        effective_batch_size = batch_size or 10
+        
         prompt = f"""Based on this analysis of customer cancellations and retention efforts:
 
 {json.dumps(analysis_results, indent=2)}
@@ -106,4 +112,21 @@ Format as JSON:
     "success_metrics": [str]
 }}"""
 
-        return await self._generate_content(prompt) 
+        return await self._generate_content(prompt)
+
+    async def analyze_distribution(
+        self,
+        attribute_values: Dict[str, List[Any]],
+        max_categories: int = 100
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Analyze the distribution of attribute values.
+        
+        Args:
+            attribute_values: Dictionary of attribute values
+            max_categories: Maximum number of categories to analyze (default: 100)
+            
+        Returns:
+            Dictionary containing analysis results
+        """
+        pass 

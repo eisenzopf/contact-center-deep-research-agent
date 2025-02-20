@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from .base import BaseAnalyzer
 
 class TextGenerator(BaseAnalyzer):
@@ -199,7 +199,7 @@ Ensure the response is specific to the attribute definition and supported by the
         self,
         conversations: List[Dict[str, str]],
         required_attributes: List[Dict[str, str]],
-        batch_size: int = 10
+        batch_size: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Generate attribute values for multiple conversations in batches.
@@ -207,12 +207,14 @@ Ensure the response is specific to the attribute definition and supported by the
         Args:
             conversations: List of conversations to analyze
             required_attributes: List of required attributes to extract
-            batch_size: Number of conversations to process in each batch (default: 10)
+            batch_size: Optional number of conversations to process in each batch.
+                       If not provided, defaults to 10
             
         Returns:
             List of attribute values for each conversation
         """
         results = []
+        effective_batch_size = batch_size or 10
         
         # Create attribute description text
         attr_descriptions = "\n".join([
@@ -221,8 +223,8 @@ Ensure the response is specific to the attribute definition and supported by the
         ])
         
         # Process conversations in batches
-        for i in range(0, len(conversations), batch_size):
-            batch = conversations[i:i + batch_size]
+        for i in range(0, len(conversations), effective_batch_size):
+            batch = conversations[i:i + effective_batch_size]
             batch_prompt = f"""Analyze these conversations and extract values for the following attributes:
 
 {attr_descriptions}
@@ -268,7 +270,8 @@ Conversations:
                 results.extend(response['conversations'])
                 
             except Exception as e:
-                print(f"Error processing batch: {e}")
+                if self.debug:
+                    print(f"Error processing batch: {e}")
                 # Add empty results for failed conversations
                 for conv in batch:
                     results.append({

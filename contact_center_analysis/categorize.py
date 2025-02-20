@@ -1,5 +1,6 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from .base import BaseAnalyzer
+import math
 
 class Categorizer(BaseAnalyzer):
     """Categorize and classify conversation elements."""
@@ -67,3 +68,114 @@ Return: list[IntentClassification]"""
                                conversations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Classify sentiment in conversations."""
         pass 
+
+    async def consolidate_labels(
+        self,
+        labels: List[Tuple[str, int]],
+        max_groups: int = 100
+    ) -> Dict[str, str]:
+        """
+        Consolidate similar labels into semantic groups.
+        
+        Args:
+            labels: List of tuples containing (label, count)
+            max_groups: Maximum number of consolidated groups to create
+            
+        Returns:
+            Dictionary mapping original labels to consolidated labels
+        """
+        consolidated_mapping = {}
+        
+        prompt = """You are a label clustering expert. Your task is to consolidate similar labels into semantic groups.
+
+INPUT LABELS TO PROCESS:
+{}
+
+Rules:
+1. Group similar labels together under a common, descriptive label
+2. Maintain semantic meaning
+3. Use consistent labeling style
+4. Use Title Case
+5. Focus on accuracy over reducing groups
+6. Maximum number of groups: {}
+
+IMPORTANT: Output your response in valid CSV format with exactly these columns:
+original_label,grouped_label
+
+Example format:
+original_label,grouped_label
+"cancel subscription","Cancel Service"
+"end my membership","Cancel Service"
+"billing help needed","Billing Support"
+""".format('\n'.join(f"- {label} ({count})" for label, count in labels), max_groups)
+
+        try:
+            response = await self._generate_content(
+                prompt,
+                expected_format={
+                    "csv_data": str
+                }
+            )
+            
+            # Clean and parse response
+            response_text = response["csv_data"]
+            if response_text.startswith('```'):
+                response_text = response_text.split('\n', 1)[1]
+                response_text = response_text.rsplit('\n', 1)[0]
+                response_text = response_text.replace('```csv\n', '').replace('```', '')
+            
+            # Parse CSV response
+            for line in response_text.strip().split('\n'):
+                if ',' in line and not line.startswith('original_label'):
+                    original, grouped = line.strip().split(',', 1)
+                    original = original.strip('"').strip()
+                    grouped = grouped.strip('"').strip()
+                    consolidated_mapping[original] = grouped
+                    
+        except Exception as e:
+            if self.debug:
+                print(f"Error consolidating labels: {e}")
+            # If error, keep original labels
+            for label, _ in labels:
+                consolidated_mapping[label] = label
+        
+        return consolidated_mapping
+
+    async def process_labels_in_batches(
+        self,
+        value_distribution: List[Tuple[str, int]],
+        batch_size: Optional[int] = None
+    ) -> Dict[str, str]:
+        """
+        Process all labels in batches, maintaining consistent grouping.
+        
+        Args:
+            value_distribution: List of tuples (value, count)
+            batch_size: Optional number of labels to process in each batch. If not provided,
+                       will use the default batch size of 200
+            
+        Returns:
+            Dictionary mapping original labels to consolidated labels
+        """
+        final_mapping = {}
+        
+        # Use default batch size if none provided
+        effective_batch_size = batch_size or 200
+        
+        # Process in batches
+        for i in range(0, len(value_distribution), effective_batch_size):
+            batch = value_distribution[i:i + effective_batch_size]
+            if self.debug:
+                print(f"\nProcessing batch {i//effective_batch_size + 1}/{math.ceil(len(value_distribution)/effective_batch_size)}")
+            
+            # Get consolidated labels for this batch
+            batch_mapping = await self.consolidate_labels(batch)
+            
+            # Update mapping
+            final_mapping.update(batch_mapping)
+            
+            if self.debug:
+                print(f"Processed {len(batch)} labels")
+                print(f"Total unique group labels: {len(set(batch_mapping.values()))}")
+        
+        return final_mapping
