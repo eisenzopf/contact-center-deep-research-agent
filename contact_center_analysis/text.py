@@ -122,3 +122,75 @@ Ensure the response is specific to the attribute definition and supported by the
         )
         
         return response 
+
+    async def generate_labeled_attribute(
+        self,
+        text: str,
+        attribute: Dict[str, str],
+        create_label: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Generate an attribute value and optionally create a concise label for it.
+        
+        Args:
+            text: The input text to analyze
+            attribute: Dictionary containing attribute definition
+            create_label: Whether to generate a concise label for the value
+            
+        Returns:
+            Dictionary containing the original analysis and optional label
+        """
+        # Handle empty text case explicitly
+        if not text.strip():
+            return {
+                "value": "No content",
+                "confidence": 0.0,
+                "explanation": "No content was provided for analysis. The text input was empty."
+            }
+
+        label_instruction = ""
+        if create_label:
+            label_instruction = "\nAlso provide a concise 2-5 word label that captures the essence of the value."
+
+        # Build the JSON structure description
+        json_structure = """    "value": str,           # The extracted or determined value
+    "confidence": float,    # Confidence score between 0 and 1
+    "explanation": str      # Explanation of how the value was determined"""
+        
+        if create_label:
+            json_structure += """,
+    "label": str           # A 2-5 word label summarizing the value"""
+
+        prompt = f"""Analyze this text to determine the value for the following attribute:
+
+Attribute: {attribute['title']}
+Description: {attribute['description']}{label_instruction}
+
+Text to analyze:
+{text}
+
+Return a JSON object with this structure:
+{{
+{json_structure}
+}}
+
+Ensure the response is specific to the attribute definition and supported by the text content."""
+
+        expected_format = {
+            "value": str,
+            "confidence": float,
+            "explanation": str
+        }
+        
+        if create_label:
+            expected_format["label"] = str
+
+        response = await self._generate_content(
+            prompt,
+            expected_format=expected_format
+        )
+        
+        if create_label:
+            response["label_confidence"] = response["confidence"]
+        
+        return response 

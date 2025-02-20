@@ -4,10 +4,27 @@ import os
 
 @pytest.fixture
 def sample_text():
-    return """Customer called about their subscription. They mentioned that the monthly cost of $49.99 
-    was too expensive compared to competitors. When offered our retention discount of 20% off for 6 months, 
-    they still decided to cancel. Primary reason given was price, but they also mentioned not using all 
-    the premium features."""
+    return """Agent: Thank you for calling customer support. My name is Sarah. How can I help you today?
+
+Customer: Hi Sarah, I need to cancel my premium subscription.
+
+Agent: I'm sorry to hear that. Could you tell me more about why you'd like to cancel?
+
+Customer: Well, it's just too expensive. I'm paying $49.99 a month and I've seen other companies offering similar services for like $29.99 or $39.99.
+
+Agent: I understand price is a concern. As a valued customer of 2 years, I can offer you our retention discount of 20% off for the next 6 months.
+
+Customer: I appreciate the offer, but even with that discount... I've been thinking about it and I'm really only using a small part of what I'm paying for.
+
+Agent: Which features do you use most often?
+
+Customer: Mostly just the basic reporting. I rarely touch the advanced analytics or those custom reporting features everyone said were so great during the sales pitch. Maybe using 40% of what I'm paying for.
+
+Agent: I understand. Would you be interested in our basic tier? It includes the standard reporting features you're using.
+
+Customer: No, I think I've made up my mind. I'd like to proceed with the cancellation.
+
+Agent: I understand. I'll help you process that cancellation right away. Your service will remain active until the end of your current billing cycle."""
 
 @pytest.fixture
 def sample_attribute():
@@ -118,3 +135,56 @@ async def test_generate_attribute_empty_text(sample_attribute, llm_debug):
     assert result["confidence"] == 0.0
     # 3. Explanation should mention empty/missing content
     assert any(phrase in result["explanation"].lower() for phrase in ["empty", "no content", "missing", "not provided"]) 
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_generate_labeled_attribute(sample_text, sample_attribute, llm_debug):
+    """Test generation of attribute value with optional label generation in a single request."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Test without label generation first
+    result = await generator.generate_labeled_attribute(
+        text=sample_text,
+        attribute=sample_attribute,
+        create_label=False
+    )
+    
+    # Verify basic response structure
+    assert "value" in result
+    assert "confidence" in result
+    assert "explanation" in result
+    assert "label" not in result
+    
+    # Test with label generation
+    result_with_label = await generator.generate_labeled_attribute(
+        text=sample_text,
+        attribute=sample_attribute,
+        create_label=True
+    )
+    
+    # Verify extended response structure
+    assert "value" in result_with_label
+    assert "confidence" in result_with_label
+    assert "explanation" in result_with_label
+    assert "label" in result_with_label
+    assert "label_confidence" in result_with_label
+    
+    # Verify label characteristics
+    assert len(result_with_label["label"].split()) <= 5, "Label should be 5 words or less"
+    assert len(result_with_label["label"]) <= 50, "Label should be 50 characters or less"
+    
+    # Verify confidence values
+    assert 0 <= result_with_label["confidence"] <= 1
+    assert 0 <= result_with_label["label_confidence"] <= 1
+    
+    # Verify value contains detailed information
+    assert len(result_with_label["value"]) > len(result_with_label["label"]), "Value should be more detailed than label"
+    
+    # Check for specific content indicators
+    value_lower = result_with_label["value"].lower()
+    assert any(word in value_lower for word in ["price", "cost", "expensive"]), "Value should mention price-related details"
+    assert any(word in value_lower for word in ["feature", "premium", "subscription"]), "Value should mention product features" 
