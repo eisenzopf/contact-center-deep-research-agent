@@ -41,11 +41,20 @@ class LLMInterface:
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel(self.model_name)
         
-        # Track usage for rate limiting
-        self.request_history = []
+        # Adjust parallel capacity for better throughput
         self.requests_per_minute = 1900
-        self.max_parallel = min(100, self.requests_per_minute // 4)  # Allow more concurrent requests
+        self.max_parallel = min(500, self.requests_per_minute // 2)
         self.semaphore = asyncio.Semaphore(self.max_parallel)
+        
+        # Use bucketed rate limiting
+        self.bucket_size = 1  # seconds
+        self.buckets = {}
+        self.bucket_locks = {}
+        
+        # Concurrent request tracking
+        self.active_requests = 0
+        self.max_concurrent_seen = 0
+        self._request_counter_lock = asyncio.Lock()
         
     async def generate_response(self,
                               prompt: str,
@@ -119,32 +128,37 @@ class LLMInterface:
                           expected_format: Optional[Dict[str, Any]] = None,
                           **kwargs) -> Any:
         """Make the actual request to the LLM."""
-        generation_config = {
-            'temperature': kwargs.pop('temperature', 0.0),
-            'candidate_count': kwargs.pop('candidate_count', 1),
-            'top_p': kwargs.pop('top_p', 0.95),
-            'top_k': kwargs.pop('top_k', 40),
-            **kwargs
-        }
-        
-        if self.debug:
-            self.logger.debug("\n=== LLM Request ===")
-            self.logger.debug(f"Prompt: {prompt}")
-            self.logger.debug(f"Expected Format: {expected_format}")
-            self.logger.debug(f"Generation Config: {generation_config}")
-        
-        response = self.model.generate_content(
-            prompt,
-            generation_config=generation_config
-        )
-        
-        if self.debug:
-            self.logger.debug("\n=== Raw LLM Response ===")
-            self.logger.debug(response.text)
-            self.logger.debug("================\n")
-        
-        self._log_request()
-        return response
+        async with self._request_counter_lock:
+            self.active_requests += 1
+            self.max_concurrent_seen = max(self.max_concurrent_seen, self.active_requests)
+            if self.debug:
+                print(f"\n=== Request Started [Concurrent: {self.active_requests}] ===")
+                print(f"Time: {time.strftime('%H:%M:%S')}")
+
+        try:
+            generation_config = {
+                'temperature': kwargs.pop('temperature', 0.0),
+                'candidate_count': kwargs.pop('candidate_count', 1),
+                'top_p': kwargs.pop('top_p', 0.95),
+                'top_k': kwargs.pop('top_k', 40),
+                **kwargs
+            }
+            
+            # Run the synchronous API call in a thread pool to make it non-blocking
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(prompt, generation_config=generation_config)
+            )
+            
+            return response
+            
+        finally:
+            async with self._request_counter_lock:
+                self.active_requests -= 1
+                if self.debug:
+                    print(f"\n=== Request Completed [Concurrent: {self.active_requests}] ===")
+                    print(f"Time: {time.strftime('%H:%M:%S')}")
     
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the response text into a dictionary."""
@@ -192,32 +206,30 @@ class LLMInterface:
         
         _validate_dict(response, expected_format)
     
-    def _log_request(self) -> None:
-        """Log request for rate limiting."""
-        current_time = datetime.now()
-        self.request_history.append(current_time)
-        
-        # Clean up old requests
-        cutoff = current_time.timestamp() - 60
-        self.request_history = [
-            req for req in self.request_history 
-            if req.timestamp() > cutoff
-        ]
-    
     async def _check_rate_limit(self) -> None:
-        """Check and enforce rate limits."""
-        current_time = datetime.now()
-        recent_requests = len([
-            req for req in self.request_history 
-            if (current_time - req).total_seconds() < 60
-        ])
+        """Check and enforce rate limits using time buckets."""
+        current_bucket = int(time.time() / self.bucket_size)
         
-        if recent_requests >= self.requests_per_minute:
-            delay = 60 - (
-                current_time - self.request_history[-self.requests_per_minute]
-            ).total_seconds()
-            if delay > 0:
-                await asyncio.sleep(delay)
+        if current_bucket not in self.bucket_locks:
+            self.bucket_locks[current_bucket] = asyncio.Lock()
+            self.buckets[current_bucket] = 0
+            
+        # Clean old buckets
+        old_buckets = [b for b in self.buckets.keys() if b < current_bucket - 60]
+        for b in old_buckets:
+            del self.buckets[b]
+            del self.bucket_locks[b]
+            
+        async with self.bucket_locks[current_bucket]:
+            if self.buckets[current_bucket] >= self.requests_per_minute / 60:
+                await asyncio.sleep(self.bucket_size)
+                # Move to next bucket after waiting
+                current_bucket = int(time.time() / self.bucket_size)
+                if current_bucket not in self.buckets:
+                    self.buckets[current_bucket] = 0
+                    self.bucket_locks[current_bucket] = asyncio.Lock()
+            
+            self.buckets[current_bucket] = self.buckets.get(current_bucket, 0) + 1
 
 class RateLimiter:
     def __init__(self, max_requests_per_minute: int):

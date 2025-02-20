@@ -5,6 +5,9 @@ import asyncio
 class TextGenerator(BaseAnalyzer):
     """Generate and analyze text content and data attributes."""
     
+    def __init__(self, api_key: str, debug: bool = False):
+        super().__init__(api_key, debug)
+        
     async def generate_required_attributes(
         self,
         questions: List[str],
@@ -211,14 +214,13 @@ Return as JSON with:
     ) -> List[Dict[str, Any]]:
         """Generate attribute values for multiple conversations in batches."""
         
-        async def process_conversation(conv):
-            return await self._process_single_conversation(conv, required_attributes)
-            
-        return await self.process_in_batches(
-            items=conversations,
-            batch_size=batch_size,
-            process_func=process_conversation
-        )
+        tasks = [
+            self._process_single_conversation(conv, required_attributes)
+            for conv in conversations
+        ]
+        
+        # Process all conversations in parallel
+        return await asyncio.gather(*tasks)
 
     async def generate_required_attributes_batch(
         self,

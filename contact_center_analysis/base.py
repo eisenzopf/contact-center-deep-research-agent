@@ -12,15 +12,15 @@ class BaseAnalyzer:
     
     def __init__(self, 
                  api_key: Optional[str] = None,
-                 model_name: str = 'gemini-2.0-flash',
-                 debug: bool = False):
+                 debug: bool = False,
+                 model_name: str = 'gemini-2.0-flash'):
         """
         Initialize base analyzer.
         
         Args:
             api_key: Gemini API key (optional, will check env var if not provided)
-            model_name: Name of Gemini model to use
             debug: Whether to enable LLM debugging
+            model_name: Name of Gemini model to use
         """
         self.debug = debug
         self.llm = LLMInterface(
@@ -61,23 +61,15 @@ class BaseAnalyzer:
         batch_size: Optional[int],
         process_func: Callable[[T], Awaitable[R]]
     ) -> List[R]:
-        """Process items in batches with true parallelization."""
+        """Process items in parallel with rate limiting."""
         if not items:
             return []
             
-        effective_batch_size = batch_size or 10
-        
         # Create all tasks at once
         tasks = [process_func(item) for item in items]
         
-        # Process in parallel batches
-        results = []
-        for i in range(0, len(tasks), effective_batch_size):
-            batch = tasks[i:i + effective_batch_size]
-            batch_results = await asyncio.gather(*batch)
-            results.extend(batch_results)
-        
-        return results
+        # Process all tasks in parallel
+        return await asyncio.gather(*tasks)
 
 class RateLimitedAnalyzer(BaseAnalyzer):
     """Base class for analyzers that need rate limiting."""

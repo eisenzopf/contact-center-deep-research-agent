@@ -2,6 +2,7 @@ import pytest
 from contact_center_analysis import TextGenerator
 import os
 import time
+from tabulate import tabulate
 
 @pytest.fixture
 def sample_text():
@@ -283,3 +284,89 @@ async def test_generate_attributes_parallel_batch(sample_text, multiple_attribut
             assert 0 <= attr_value["confidence"] <= 1
             assert isinstance(attr_value["label"], str)
             assert len(attr_value["label"]) <= 50 
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_batch_vs_parallel_performance(sample_text, multiple_attributes, llm_debug, capsys):
+    """Compare performance between batch and parallel batch processing."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Create large set of conversations
+    num_conversations = 20
+    conversations = [
+        {"id": str(i), "text": sample_text} for i in range(num_conversations)
+    ]
+    
+    # Test sequential batch processing
+    with capsys.disabled():
+        print("\nStarting sequential batch processing...")
+    start_time = time.time()
+    batch_results = await generator.generate_attributes_batch(
+        conversations=conversations,
+        required_attributes=multiple_attributes,
+        batch_size=1  # Process one at a time
+    )
+    batch_time = time.time() - start_time
+    with capsys.disabled():
+        print(f"Sequential batch processing took: {batch_time:.2f}s")
+    
+    # Test parallel batch processing
+    with capsys.disabled():
+        print("\nStarting parallel batch processing...")
+    start_time = time.time()
+    parallel_results = await generator.generate_attributes_batch(
+        conversations=conversations,
+        required_attributes=multiple_attributes,
+        batch_size=20  # Process all conversations in parallel
+    )
+    parallel_time = time.time() - start_time
+    with capsys.disabled():
+        print(f"Parallel batch processing took: {parallel_time:.2f}s")
+    
+    # Verify both approaches give same results
+    assert len(batch_results) == len(parallel_results)
+    assert len(batch_results) == num_conversations
+    
+    # Verify structure matches in both results
+    for batch_result, parallel_result in zip(batch_results, parallel_results):
+        assert batch_result["conversation_id"] == parallel_result["conversation_id"]
+        assert len(batch_result["attribute_values"]) == len(parallel_result["attribute_values"])
+        
+        # Compare attribute values
+        for batch_attr, parallel_attr in zip(
+            batch_result["attribute_values"], 
+            parallel_result["attribute_values"]
+        ):
+            assert batch_attr["field_name"] == parallel_attr["field_name"]
+            assert isinstance(batch_attr["value"], str)
+            assert isinstance(parallel_attr["value"], str)
+            assert isinstance(batch_attr["confidence"], float)
+            assert isinstance(parallel_attr["confidence"], float)
+            assert "label" in batch_attr
+            assert "label" in parallel_attr
+    
+    # Generate performance report
+    speedup = batch_time/parallel_time
+    items_per_second_batch = num_conversations / batch_time
+    items_per_second_parallel = num_conversations / parallel_time
+    
+    report_data = [
+        ["Metric", "Sequential Batch", "Parallel Batch"],
+        ["Total Time (s)", f"{batch_time:.2f}", f"{parallel_time:.2f}"],
+        ["Items Processed", num_conversations, num_conversations],
+        ["Items/Second", f"{items_per_second_batch:.2f}", f"{items_per_second_parallel:.2f}"],
+        ["Batch Size", "1", "20"],
+        ["Speedup", "-", f"{speedup:.2f}x"]
+    ]
+    
+    with capsys.disabled():
+        print("\n=== Performance Report ===")
+        print(tabulate(report_data, headers="firstrow", tablefmt="grid"))
+
+    with capsys.disabled():
+        print("\n=== Parallelization Stats ===")
+        print(f"Maximum Concurrent Requests: {generator.llm.max_concurrent_seen}") 
