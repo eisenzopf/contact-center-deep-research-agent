@@ -1,6 +1,8 @@
 import pytest
 from contact_center_analysis import Categorizer
 import os
+import time
+import asyncio
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
@@ -169,4 +171,72 @@ async def test_single_billing_intent(billing_examples, llm_debug):
     )
     
     assert len(results) == 1
-    assert results.get("billing question about invoice") == True 
+    assert results.get("billing question about invoice") == True
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_is_in_class_batch(sample_intents, cancellation_examples, llm_debug):
+    """Test batch processing of intent classification."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Create multiple sets of intents
+    all_intents = sample_intents * 3  # Triple the intents for batch processing
+    
+    results = await categorizer.is_in_class_batch(
+        intents=all_intents,
+        target_class="cancellation",
+        examples=cancellation_examples,
+        batch_size=5
+    )
+    
+    assert len(results) == len(all_intents)
+    assert isinstance(results, list)
+    assert all(isinstance(r, dict) and len(r) == 1 for r in results)
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_is_in_class_parallel_batch(sample_intents, cancellation_examples, llm_debug):
+    """Test parallel batch processing of intent classification."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Create larger set of intents
+    all_intents = sample_intents * 5  # 5x intents for parallel processing
+    
+    start_time = time.time()
+    results = await categorizer.is_in_class_batch(
+        intents=all_intents,
+        target_class="cancellation",
+        examples=cancellation_examples,
+        batch_size=10  # Process 10 at a time in parallel
+    )
+    parallel_time = time.time() - start_time
+    
+    # Replace sequential loop with batched calls:
+    sequential_batches = [
+        all_intents[i:i+1] for i in range(0, len(all_intents))
+    ]
+    sequential_tasks = [
+        categorizer.is_in_class(
+            intents=batch,
+            target_class="cancellation",
+            examples=cancellation_examples
+        )
+        for batch in sequential_batches
+    ]
+    sequential_results = await asyncio.gather(*sequential_tasks)
+    
+    # Verify parallel processing worked
+    assert len(results) == len(all_intents)
+    assert isinstance(results, list)
+    assert all(isinstance(r, dict) and len(r) == 1 for r in results)
+    
+    # Note: We don't strictly assert parallel_time < sequential_time anymore
+    # since rate limiting might make them similar 

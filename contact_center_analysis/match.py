@@ -174,38 +174,80 @@ Each group should have:
         batch_size: Optional[int] = None,
         confidence_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
-        """
-        Match multiple required attributes against available attributes in batches.
+        """Match multiple required attributes against available attributes in batches."""
         
-        Args:
-            required_attributes: List of required attributes to match
-            available_attributes: List of available attributes to match against
-            batch_size: Optional number of comparisons to process in each batch.
-                       If not provided, defaults to 10
-            confidence_threshold: Minimum confidence score to consider a match
+        async def process_attribute(attr):
+            matches = await self._process_single_match(
+                attr, 
+                available_attributes, 
+                confidence_threshold
+            )
+            return {
+                "required_field": attr.get("field_name", ""),
+                "matched_attribute": matches.get("matched_field"),
+                "confidence": matches.get("confidence", 0.0)
+            }
             
-        Returns:
-            List of match results for each required attribute
-        """
-        results = []
-        effective_batch_size = batch_size or 10
+        return await self.process_in_batches(
+            items=required_attributes,
+            batch_size=batch_size or 5,  # Smaller default batch size for better performance
+            process_func=process_attribute
+        )
+
+    async def _process_single_match(self, attr: Dict[str, str], available_attributes: List[Dict[str, str]], confidence_threshold: float) -> Dict[str, Any]:
+        """Process a single attribute match."""
         
-        # Process required attributes in batches
-        for i in range(0, len(required_attributes), effective_batch_size):
-            batch = required_attributes[i:i + effective_batch_size]
-            batch_prompt = """Compare these required attributes with available attributes to find matches.
+        field_name = attr.get('field_name') or attr.get('name')
+        if not field_name:
+            raise ValueError("Attribute must have either 'field_name' or 'name' key")
+            
+        try:
+            response = await self._generate_content(
+                self._generate_match_prompt(field_name, attr, available_attributes),
+                expected_format={
+                    "matches": [{
+                        "required_field": str,
+                        "matched_attribute": str,
+                        "confidence": float
+                    }]
+                }
+            )
+            
+            # Find best match above threshold
+            best_match = None
+            best_confidence = 0
+            for match in response['matches']:
+                if match['confidence'] >= confidence_threshold and match['confidence'] > best_confidence:
+                    best_match = match['matched_attribute']
+                    best_confidence = match['confidence']
+                    
+            return {
+                "matched_field": best_match,
+                "confidence": best_confidence
+            }
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Error processing attribute: {e}")
+            return {
+                "matched_field": None,
+                "confidence": 0.0
+            }
+
+    def _generate_match_prompt(self, field_name: str, attr: Dict[str, str], available_attributes: List[Dict[str, str]]) -> str:
+        """Generate a prompt for matching a single attribute."""
+        prompt = f"""Compare the attribute "{field_name}" with available attributes to find matches.
 
 Available Attributes:
 """
-            # Add available attributes to prompt
-            for attr in available_attributes:
-                batch_prompt += f"- {attr['name']}: {attr.get('description', '')}\n"
-            
-            batch_prompt += "\nRequired Attributes to Match:\n"
-            for attr in batch:
-                batch_prompt += f"- {attr['field_name']}: {attr['description']}\n"
-            
-            batch_prompt += """
+        # Add available attributes to prompt
+        for avail_attr in available_attributes:
+            prompt += f"- {avail_attr['name']}: {avail_attr.get('description', '')}\n"
+
+        prompt += "\nRequired Attribute to Match:\n"
+        prompt += f"- {field_name}: {attr['description']}\n"
+        
+        prompt += """
 Return matches in this JSON format:
 {
     "matches": [
@@ -216,34 +258,5 @@ Return matches in this JSON format:
         }
     ]
 }"""
-            
-            try:
-                response = await self._generate_content(
-                    batch_prompt,
-                    expected_format={
-                        "matches": [{
-                            "required_field": str,
-                            "matched_attribute": str,
-                            "confidence": float
-                        }]
-                    }
-                )
-                
-                # Filter matches based on confidence threshold
-                matches = [
-                    match for match in response['matches']
-                    if match['confidence'] >= confidence_threshold
-                ]
-                results.extend(matches)
-                
-            except Exception as e:
-                print(f"Error processing batch: {e}")
-                # Add empty matches for failed batch
-                for attr in batch:
-                    results.append({
-                        "required_field": attr['field_name'],
-                        "matched_attribute": None,
-                        "confidence": 0.0
-                    })
         
-        return results 
+        return prompt

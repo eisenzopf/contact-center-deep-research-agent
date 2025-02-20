@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional, Tuple
 from .base import BaseAnalyzer
+import asyncio
 
 class TextGenerator(BaseAnalyzer):
     """Generate and analyze text content and data attributes."""
@@ -33,8 +34,17 @@ class TextGenerator(BaseAnalyzer):
                 f"- {attr}" for attr in existing_attributes
             )
             
-        prompt = f"""We need to determine what data attributes are required to answer these questions:
-{questions_text}
+        # Split into smaller chunks for parallel processing
+        chunk_size = 3  # Process 3 questions at a time
+        question_chunks = [questions[i:i + chunk_size] 
+                          for i in range(0, len(questions), chunk_size)]
+        
+        # Create tasks for parallel processing
+        tasks = []
+        for chunk in question_chunks:
+            chunk_text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(chunk))
+            prompt = f"""We need to determine what data attributes are required to answer these questions:
+{chunk_text}
 {existing_text}
 
 Return a JSON object with this structure:
@@ -47,23 +57,28 @@ Return a JSON object with this structure:
             "rationale": str    # Why this attribute is needed for the questions
         }}
     ]
-}}
-
-Ensure the response is a valid JSON object with an 'attributes' array containing the required attribute definitions."""
-
-        response = await self._generate_content(
-            prompt,
-            expected_format={
-                "attributes": [{
-                    "field_name": str,
-                    "title": str,
-                    "description": str,
-                    "rationale": str
-                }]
-            }
-        )
+}}"""
+            tasks.append(self._generate_content(
+                prompt,
+                expected_format={
+                    "attributes": [{
+                        "field_name": str,
+                        "title": str,
+                        "description": str,
+                        "rationale": str
+                    }]
+                }
+            ))
         
-        return response
+        # Process chunks in parallel
+        chunk_results = await asyncio.gather(*tasks)
+        
+        # Combine results
+        all_attributes = []
+        for result in chunk_results:
+            all_attributes.extend(result["attributes"])
+        
+        return {"attributes": all_attributes}
 
     async def generate_attribute(
         self,
@@ -127,61 +142,31 @@ Ensure the response is specific to the attribute definition and supported by the
         self,
         text: str,
         attribute: Dict[str, str],
-        create_label: bool = False
+        create_label: bool = True
     ) -> Dict[str, Any]:
-        """
-        Generate an attribute value and optionally create a concise label for it.
+        """Generate attribute value with optional label generation."""
         
-        Args:
-            text: The input text to analyze
-            attribute: Dictionary containing attribute definition
-            create_label: Whether to generate a concise label for the value
-            
-        Returns:
-            Dictionary containing the original analysis and optional label
-        """
-        # Handle empty text case explicitly
-        if not text.strip():
-            return {
-                "value": "No content",
-                "confidence": 0.0,
-                "explanation": "No content was provided for analysis. The text input was empty."
-            }
-
-        label_instruction = ""
-        if create_label:
-            label_instruction = "\nAlso provide a concise 2-5 word label that captures the essence of the value."
-
-        # Build the JSON structure description
-        json_structure = """    "value": str,           # The extracted or determined value
-    "confidence": float,    # Confidence score between 0 and 1
-    "explanation": str      # Explanation of how the value was determined"""
-        
-        if create_label:
-            json_structure += """,
-    "label": str           # A 2-5 word label summarizing the value"""
-
-        prompt = f"""Analyze this text to determine the value for the following attribute:
+        prompt = f"""Analyze this conversation text and extract the value for the following attribute:
 
 Attribute: {attribute['title']}
-Description: {attribute['description']}{label_instruction}
+Description: {attribute['description']}
 
-Text to analyze:
+Text:
 {text}
 
-Return a JSON object with this structure:
-{{
-{json_structure}
-}}
+Return as JSON with:
+- value: extracted value
+- confidence: float between 0-1
+"""
 
-Ensure the response is specific to the attribute definition and supported by the text content."""
+        if create_label:
+            prompt += """
+- label: short categorical label for the value"""
 
         expected_format = {
             "value": str,
-            "confidence": float,
-            "explanation": str
+            "confidence": float
         }
-        
         if create_label:
             expected_format["label"] = str
 
@@ -190,10 +175,33 @@ Ensure the response is specific to the attribute definition and supported by the
             expected_format=expected_format
         )
         
-        if create_label:
-            response["label_confidence"] = response["confidence"]
+        return {
+            "field_name": attribute["field_name"],
+            "value": response.get("value", ""),
+            "confidence": response.get("confidence", 0.0),
+            **({"label": response.get("label")} if create_label else {})
+        }
+
+    async def _process_single_conversation(self, conversation: Dict[str, str], required_attributes: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Process a single conversation to generate attribute values."""
         
-        return response 
+        conv_text = conversation.get('text', '')
+        conv_id = conversation.get('id', '')
+        
+        # Generate values for all attributes in parallel
+        tasks = [
+            self.generate_labeled_attribute(
+                text=conv_text,
+                attribute=attr
+            )
+            for attr in required_attributes
+        ]
+        attribute_values = await asyncio.gather(*tasks)
+        
+        return {
+            "conversation_id": conv_id,
+            "attribute_values": attribute_values
+        }
 
     async def generate_attributes_batch(
         self,
@@ -201,82 +209,42 @@ Ensure the response is specific to the attribute definition and supported by the
         required_attributes: List[Dict[str, str]],
         batch_size: Optional[int] = None
     ) -> List[Dict[str, Any]]:
+        """Generate attribute values for multiple conversations in batches."""
+        
+        async def process_conversation(conv):
+            return await self._process_single_conversation(conv, required_attributes)
+            
+        return await self.process_in_batches(
+            items=conversations,
+            batch_size=batch_size,
+            process_func=process_conversation
+        )
+
+    async def generate_required_attributes_batch(
+        self,
+        questions_sets: List[List[str]],
+        existing_attributes: Optional[List[str]] = None,
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Generate attribute values for multiple conversations in batches.
+        Generate required attributes for multiple sets of questions in parallel.
         
         Args:
-            conversations: List of conversations to analyze
-            required_attributes: List of required attributes to extract
-            batch_size: Optional number of conversations to process in each batch.
-                       If not provided, defaults to 10
+            questions_sets: List of question sets to analyze
+            existing_attributes: Optional list of data attributes already available
+            batch_size: Optional number of sets to process in each batch
             
         Returns:
-            List of attribute values for each conversation
+            List of dictionaries containing required attributes for each set
         """
-        results = []
-        effective_batch_size = batch_size or 10
-        
-        # Create attribute description text
-        attr_descriptions = "\n".join([
-            f"- {attr['field_name']} ({attr['title']}): {attr['description']}"
-            for attr in required_attributes
-        ])
-        
-        # Process conversations in batches
-        for i in range(0, len(conversations), effective_batch_size):
-            batch = conversations[i:i + effective_batch_size]
-            batch_prompt = f"""Analyze these conversations and extract values for the following attributes:
-
-{attr_descriptions}
-
-Use this JSON schema:
-{{
-    "conversations": [
-        {{
-            "conversation_id": str,
-            "attribute_values": [
-                {{
-                    "field_name": str,
-                    "value": str,
-                    "confidence": float
-                }}
-            ]
-        }}
-    ]
-}}
-
-Conversations:
-"""
+        async def process_questions(questions):
+            return await self.generate_required_attributes(
+                questions=questions,
+                existing_attributes=existing_attributes
+            )
             
-            # Add each conversation to the batch prompt
-            for conv in batch:
-                batch_prompt += f"\nConversation {conv['id']}:\n{conv['text']}\n"
-            
-            try:
-                response = await self._generate_content(
-                    batch_prompt,
-                    expected_format={
-                        "conversations": [{
-                            "conversation_id": str,
-                            "attribute_values": [{
-                                "field_name": str,
-                                "value": str,
-                                "confidence": float
-                            }]
-                        }]
-                    }
-                )
-                
-                results.extend(response['conversations'])
-                
-            except Exception as e:
-                if self.debug:
-                    print(f"Error processing batch: {e}")
-                # Add empty results for failed conversations
-                for conv in batch:
-                    results.append({
-                        "conversation_id": conv['id'],
-                        "attribute_values": []
-                    })
-        
-        return results 
+        return await self.process_in_batches(
+            questions_sets,
+            batch_size=batch_size,
+            process_func=process_questions
+        ) 

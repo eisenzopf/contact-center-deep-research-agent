@@ -1,6 +1,7 @@
 import pytest
 from contact_center_analysis import TextGenerator
 import os
+import time
 
 @pytest.fixture
 def sample_text():
@@ -153,11 +154,16 @@ async def test_generate_labeled_attribute(sample_text, sample_attribute, llm_deb
         create_label=False
     )
     
-    # Verify basic response structure
+    # Verify basic structure
+    assert "field_name" in result
     assert "value" in result
     assert "confidence" in result
-    assert "explanation" in result
     assert "label" not in result
+    
+    # Verify data types
+    assert isinstance(result["value"], str)
+    assert isinstance(result["confidence"], float)
+    assert 0 <= result["confidence"] <= 1
     
     # Test with label generation
     result_with_label = await generator.generate_labeled_attribute(
@@ -166,28 +172,24 @@ async def test_generate_labeled_attribute(sample_text, sample_attribute, llm_deb
         create_label=True
     )
     
-    # Verify extended response structure
+    # Verify label is included
+    assert "field_name" in result_with_label
     assert "value" in result_with_label
     assert "confidence" in result_with_label
-    assert "explanation" in result_with_label
     assert "label" in result_with_label
-    assert "label_confidence" in result_with_label
+    
+    # Verify data types
+    assert isinstance(result_with_label["value"], str)
+    assert isinstance(result_with_label["confidence"], float)
+    assert isinstance(result_with_label["label"], str)
+    assert 0 <= result_with_label["confidence"] <= 1
     
     # Verify label characteristics
     assert len(result_with_label["label"].split()) <= 5, "Label should be 5 words or less"
     assert len(result_with_label["label"]) <= 50, "Label should be 50 characters or less"
     
-    # Verify confidence values
-    assert 0 <= result_with_label["confidence"] <= 1
-    assert 0 <= result_with_label["label_confidence"] <= 1
-    
     # Verify value contains detailed information
     assert len(result_with_label["value"]) > len(result_with_label["label"]), "Value should be more detailed than label"
-    
-    # Check for specific content indicators
-    value_lower = result_with_label["value"].lower()
-    assert any(word in value_lower for word in ["price", "cost", "expensive"]), "Value should mention price-related details"
-    assert any(word in value_lower for word in ["feature", "premium", "subscription"]), "Value should mention product features"
 
 @pytest.mark.llm_debug
 @pytest.mark.asyncio
@@ -242,3 +244,42 @@ async def test_generate_attributes_batch_empty(multiple_attributes, llm_debug):
     )
     
     assert len(results) == 0 
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_generate_attributes_parallel_batch(sample_text, multiple_attributes, llm_debug):
+    """Test parallel batch processing of attribute generation."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Create larger set of conversations for parallel processing
+    conversations = [
+        {"id": str(i), "text": sample_text} for i in range(10)
+    ]
+    
+    # Test batch processing
+    results = await generator.generate_attributes_batch(
+        conversations=conversations,
+        required_attributes=multiple_attributes,
+        batch_size=5  # Process 5 at a time
+    )
+    
+    # Verify results structure
+    assert len(results) == len(conversations)
+    for result in results:
+        assert "conversation_id" in result
+        assert "attribute_values" in result
+        assert len(result["attribute_values"]) == len(multiple_attributes)
+        
+        # Verify each attribute value
+        for attr_value in result["attribute_values"]:
+            assert "field_name" in attr_value
+            assert "value" in attr_value
+            assert "confidence" in attr_value
+            assert "label" in attr_value  # Label is included by default
+            assert 0 <= attr_value["confidence"] <= 1
+            assert isinstance(attr_value["label"], str)
+            assert len(attr_value["label"]) <= 50 

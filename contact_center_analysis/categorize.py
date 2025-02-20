@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Tuple
 from .base import BaseAnalyzer
 import math
+import asyncio
 
 class Categorizer(BaseAnalyzer):
     """Categorize and classify conversation elements."""
@@ -179,3 +180,40 @@ original_label,grouped_label
                 print(f"Total unique group labels: {len(set(batch_mapping.values()))}")
         
         return final_mapping
+
+    async def is_in_class_batch(
+        self,
+        intents: List[Dict[str, str]],
+        target_class: str,
+        examples: Optional[List[str]] = None,
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, bool]]:
+        """Process multiple intents in batches efficiently."""
+        
+        # Use default batch size if none provided
+        effective_batch_size = batch_size or 50  # Smaller default batch size for parallel processing
+        
+        # Process intents in parallel batches
+        all_results = []
+        tasks = []
+        
+        for i in range(0, len(intents), effective_batch_size):
+            batch = intents[i:i + effective_batch_size]
+            task = self.is_in_class(
+                intents=batch,
+                target_class=target_class,
+                examples=examples,
+                batch_size=effective_batch_size
+            )
+            tasks.append(task)
+        
+        # Execute batches in parallel
+        batch_results = await asyncio.gather(*tasks)
+        
+        # Convert dictionary results to list in correct order
+        for i, intent in enumerate(intents):
+            batch_index = i // effective_batch_size
+            result = batch_results[batch_index].get(intent['name'], False)
+            all_results.append({intent['name']: result})
+        
+        return all_results

@@ -43,7 +43,9 @@ class LLMInterface:
         
         # Track usage for rate limiting
         self.request_history = []
-        self.requests_per_minute = 1900  # Gemini rate limit
+        self.requests_per_minute = 1900
+        self.max_parallel = min(100, self.requests_per_minute // 4)  # Allow more concurrent requests
+        self.semaphore = asyncio.Semaphore(self.max_parallel)
         
     async def generate_response(self,
                               prompt: str,
@@ -53,34 +55,64 @@ class LLMInterface:
         """
         Generate a response from the LLM with retry logic and validation.
         """
-        await self._check_rate_limit()
-        
-        for attempt in range(self.max_retries):
-            try:
-                response = await self._make_request(
-                    prompt,
-                    expected_format=expected_format,
-                    temperature=temperature,
-                    **kwargs
-                )
-                
-                parsed_response = self._parse_response(response.text)
-                
-                if expected_format:
-                    if self.debug:
-                        self.logger.debug("\n=== Validating Response ===")
-                        self.logger.debug(f"Parsed Response: {parsed_response}")
-                    self._validate_response(parsed_response, expected_format)
+        async with self.semaphore:
+            await self._check_rate_limit()
+            
+            for attempt in range(self.max_retries):
+                try:
+                    response = await self._make_request(
+                        prompt,
+                        expected_format=expected_format,
+                        temperature=temperature,
+                        **kwargs
+                    )
                     
-                return parsed_response
-                
-            except Exception as e:
-                if self.debug:
-                    self.logger.debug(f"\n=== Error on attempt {attempt + 1}/{self.max_retries} ===")
-                    self.logger.debug(f"Error: {str(e)}")
-                if attempt == self.max_retries - 1:
-                    raise
-                await asyncio.sleep(self.retry_delay * (attempt + 1))
+                    parsed_response = self._parse_response(response.text)
+                    
+                    if expected_format:
+                        if self.debug:
+                            self.logger.debug("\n=== Validating Response ===")
+                            self.logger.debug(f"Parsed Response: {parsed_response}")
+                        self._validate_response(parsed_response, expected_format)
+                        
+                    return parsed_response
+                    
+                except Exception as e:
+                    if self.debug:
+                        self.logger.debug(f"\n=== Error on attempt {attempt + 1}/{self.max_retries} ===")
+                        self.logger.debug(f"Error: {str(e)}")
+                    if attempt == self.max_retries - 1:
+                        raise
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+    
+    async def generate_responses_batch(
+        self,
+        prompts: List[str],
+        expected_format: Optional[Dict[str, Any]] = None,
+        batch_size: Optional[int] = None,
+        temperature: float = 0.0,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """Generate multiple responses in parallel while respecting rate limits."""
+        # Let the semaphore handle concurrency
+        all_tasks = [
+            self.generate_response(
+                prompt,
+                expected_format=expected_format,
+                temperature=temperature,
+                **kwargs
+            )
+            for prompt in prompts
+        ]
+        
+        # Process all at once, let semaphore handle rate limiting
+        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        
+        # Handle exceptions
+        return [
+            None if isinstance(r, Exception) else r 
+            for r in results
+        ]
     
     async def _make_request(self,
                           prompt: str,
@@ -185,7 +217,7 @@ class LLMInterface:
                 current_time - self.request_history[-self.requests_per_minute]
             ).total_seconds()
             if delay > 0:
-                await asyncio.sleep(delay) 
+                await asyncio.sleep(delay)
 
 class RateLimiter:
     def __init__(self, max_requests_per_minute: int):

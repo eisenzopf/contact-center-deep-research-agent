@@ -129,4 +129,56 @@ Format as JSON:
         Returns:
             Dictionary containing analysis results
         """
-        pass 
+        pass
+
+    async def analyze_findings_batch(
+        self,
+        attribute_values: List[Dict[str, Any]],
+        questions: List[str],
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze findings from multiple attribute extractions in parallel.
+        
+        Args:
+            attribute_values: List of attribute value dictionaries to analyze
+            questions: List of research questions to answer
+            batch_size: Optional number of items to process in each batch.
+                       If not provided, defaults to 10
+            
+        Returns:
+            List of analysis results for each set of attribute values
+        """
+        async def process_attributes(attrs):
+            return await self.analyze_findings(attrs, questions)
+            
+        return await self.process_in_batches(
+            attribute_values,
+            batch_size=batch_size,
+            process_func=process_attributes
+        )
+
+    async def analyze_retention_strategies_batch(
+        self,
+        analysis_results: List[Dict[str, Any]],
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate retention strategy recommendations for multiple analyses in parallel.
+        
+        Args:
+            analysis_results: List of analysis results to process
+            batch_size: Optional number of items to process in each batch.
+                       If not provided, defaults to 10
+            
+        Returns:
+            List of strategy recommendations for each analysis
+        """
+        async def process_analysis(analysis):
+            return await self.analyze_retention_strategies(analysis)
+            
+        return await self.process_in_batches(
+            analysis_results,
+            batch_size=batch_size,
+            process_func=process_analysis
+        ) 
