@@ -5,6 +5,7 @@ import os
 import asyncio
 from datetime import datetime
 import logging
+import time
 
 class LLMInterface:
     """Interface for handling LLM interactions."""
@@ -185,3 +186,25 @@ class LLMInterface:
             ).total_seconds()
             if delay > 0:
                 await asyncio.sleep(delay) 
+
+class RateLimiter:
+    def __init__(self, max_requests_per_minute: int):
+        self.max_requests = max_requests_per_minute
+        self.requests = []
+        self.lock = asyncio.Lock()
+    
+    async def acquire(self):
+        async with self.lock:
+            current_time = time.time()
+            self.requests = [req_time for req_time in self.requests 
+                           if current_time - req_time < 60]
+            
+            if len(self.requests) >= self.max_requests:
+                wait_time = 60 - (current_time - self.requests[0])
+                if wait_time > 0:
+                    await asyncio.sleep(wait_time)
+                    current_time = time.time()
+                    self.requests = [req_time for req_time in self.requests 
+                                   if current_time - req_time < 60]
+            
+            self.requests.append(current_time) 

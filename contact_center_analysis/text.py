@@ -194,3 +194,86 @@ Ensure the response is specific to the attribute definition and supported by the
             response["label_confidence"] = response["confidence"]
         
         return response 
+
+    async def generate_attributes_batch(
+        self,
+        conversations: List[Dict[str, str]],
+        required_attributes: List[Dict[str, str]],
+        batch_size: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate attribute values for multiple conversations in batches.
+        
+        Args:
+            conversations: List of conversations to analyze
+            required_attributes: List of required attributes to extract
+            batch_size: Number of conversations to process in each batch (default: 10)
+            
+        Returns:
+            List of attribute values for each conversation
+        """
+        results = []
+        
+        # Create attribute description text
+        attr_descriptions = "\n".join([
+            f"- {attr['field_name']} ({attr['title']}): {attr['description']}"
+            for attr in required_attributes
+        ])
+        
+        # Process conversations in batches
+        for i in range(0, len(conversations), batch_size):
+            batch = conversations[i:i + batch_size]
+            batch_prompt = f"""Analyze these conversations and extract values for the following attributes:
+
+{attr_descriptions}
+
+Use this JSON schema:
+{{
+    "conversations": [
+        {{
+            "conversation_id": str,
+            "attribute_values": [
+                {{
+                    "field_name": str,
+                    "value": str,
+                    "confidence": float
+                }}
+            ]
+        }}
+    ]
+}}
+
+Conversations:
+"""
+            
+            # Add each conversation to the batch prompt
+            for conv in batch:
+                batch_prompt += f"\nConversation {conv['id']}:\n{conv['text']}\n"
+            
+            try:
+                response = await self._generate_content(
+                    batch_prompt,
+                    expected_format={
+                        "conversations": [{
+                            "conversation_id": str,
+                            "attribute_values": [{
+                                "field_name": str,
+                                "value": str,
+                                "confidence": float
+                            }]
+                        }]
+                    }
+                )
+                
+                results.extend(response['conversations'])
+                
+            except Exception as e:
+                print(f"Error processing batch: {e}")
+                # Add empty results for failed conversations
+                for conv in batch:
+                    results.append({
+                        "conversation_id": conv['id'],
+                        "attribute_values": []
+                    })
+        
+        return results 

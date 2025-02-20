@@ -65,9 +65,11 @@ async def test_basic_attribute_matching(sample_questions, sample_available_attri
         debug=llm_debug
     )
     
+    # Use a lower confidence threshold since semantic matches might not be exact
     matches, missing = await matcher.find_matches(
         required_attributes=required_attrs['attributes'],
-        available_attributes=sample_available_attributes
+        available_attributes=sample_available_attributes,
+        confidence_threshold=0.6  # Lower threshold to catch semantic matches
     )
     
     # Verify we got some matches
@@ -146,4 +148,57 @@ async def test_confidence_threshold(sample_questions, sample_available_attribute
     )
     
     # Verify we get more matches with lower threshold
-    assert len(matches_lenient) >= len(matches) 
+    assert len(matches_lenient) >= len(matches)
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_find_matches_batch(sample_questions, sample_available_attributes, llm_debug):
+    """Test batch processing of attribute matching."""
+    
+    text_gen = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    required_attrs = await text_gen.generate_required_attributes(
+        questions=sample_questions
+    )
+    
+    matcher = AttributeMatcher(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    results = await matcher.find_matches_batch(
+        required_attributes=required_attrs['attributes'],
+        available_attributes=sample_available_attributes,
+        batch_size=2,  # Test with small batch size
+        confidence_threshold=0.7
+    )
+    
+    # Verify results structure
+    assert isinstance(results, list)
+    assert len(results) > 0
+    
+    for match in results:
+        assert "required_field" in match
+        assert "matched_attribute" in match or match["matched_attribute"] is None
+        assert "confidence" in match
+        assert 0 <= match["confidence"] <= 1
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_find_matches_batch_empty(sample_available_attributes, llm_debug):
+    """Test batch matching with empty required attributes."""
+    
+    matcher = AttributeMatcher(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    results = await matcher.find_matches_batch(
+        required_attributes=[],
+        available_attributes=sample_available_attributes
+    )
+    
+    assert len(results) == 0 

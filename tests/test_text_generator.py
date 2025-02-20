@@ -187,4 +187,58 @@ async def test_generate_labeled_attribute(sample_text, sample_attribute, llm_deb
     # Check for specific content indicators
     value_lower = result_with_label["value"].lower()
     assert any(word in value_lower for word in ["price", "cost", "expensive"]), "Value should mention price-related details"
-    assert any(word in value_lower for word in ["feature", "premium", "subscription"]), "Value should mention product features" 
+    assert any(word in value_lower for word in ["feature", "premium", "subscription"]), "Value should mention product features"
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_generate_attributes_batch(sample_text, multiple_attributes, llm_debug):
+    """Test batch processing of attribute generation."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Create multiple conversations
+    conversations = [
+        {"id": "1", "text": sample_text},
+        {"id": "2", "text": sample_text},
+        {"id": "3", "text": sample_text}
+    ]
+    
+    results = await generator.generate_attributes_batch(
+        conversations=conversations,
+        required_attributes=multiple_attributes,
+        batch_size=2  # Test with small batch size
+    )
+    
+    # Verify results structure
+    assert len(results) == len(conversations)
+    for result in results:
+        assert "conversation_id" in result
+        assert "attribute_values" in result
+        assert len(result["attribute_values"]) == len(multiple_attributes)
+        
+        # Verify each attribute value
+        for attr_value in result["attribute_values"]:
+            assert "field_name" in attr_value
+            assert "value" in attr_value
+            assert "confidence" in attr_value
+            assert 0 <= attr_value["confidence"] <= 1
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_generate_attributes_batch_empty(multiple_attributes, llm_debug):
+    """Test batch processing with empty conversations."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    results = await generator.generate_attributes_batch(
+        conversations=[],
+        required_attributes=multiple_attributes
+    )
+    
+    assert len(results) == 0 

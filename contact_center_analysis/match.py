@@ -161,4 +161,83 @@ Each group should have:
 
     def _format_candidates(self, items: List[str]) -> str:
         """Format list of items for prompt."""
-        return "\n".join(f"- {item}" for item in items) 
+        return "\n".join(f"- {item}" for item in items)
+
+    async def find_matches_batch(
+        self,
+        required_attributes: List[Dict[str, Any]],
+        available_attributes: List[Dict[str, Any]],
+        batch_size: int = 10,
+        confidence_threshold: float = 0.7
+    ) -> List[Dict[str, Any]]:
+        """
+        Match multiple required attributes against available attributes in batches.
+        
+        Args:
+            required_attributes: List of required attributes to match
+            available_attributes: List of available attributes to match against
+            batch_size: Number of comparisons to process in each batch (default: 10)
+            confidence_threshold: Minimum confidence score to consider a match
+            
+        Returns:
+            List of match results for each required attribute
+        """
+        results = []
+        
+        # Process required attributes in batches
+        for i in range(0, len(required_attributes), batch_size):
+            batch = required_attributes[i:i + batch_size]
+            batch_prompt = """Compare these required attributes with available attributes to find matches.
+
+Available Attributes:
+"""
+            # Add available attributes to prompt
+            for attr in available_attributes:
+                batch_prompt += f"- {attr['name']}: {attr.get('description', '')}\n"
+            
+            batch_prompt += "\nRequired Attributes to Match:\n"
+            for attr in batch:
+                batch_prompt += f"- {attr['field_name']}: {attr['description']}\n"
+            
+            batch_prompt += """
+Return matches in this JSON format:
+{
+    "matches": [
+        {
+            "required_field": str,
+            "matched_attribute": str,
+            "confidence": float
+        }
+    ]
+}"""
+            
+            try:
+                response = await self._generate_content(
+                    batch_prompt,
+                    expected_format={
+                        "matches": [{
+                            "required_field": str,
+                            "matched_attribute": str,
+                            "confidence": float
+                        }]
+                    }
+                )
+                
+                # Filter matches based on confidence threshold
+                matches = [
+                    match for match in response['matches']
+                    if match['confidence'] >= confidence_threshold
+                ]
+                results.extend(matches)
+                
+            except Exception as e:
+                print(f"Error processing batch: {e}")
+                # Add empty matches for failed batch
+                for attr in batch:
+                    results.append({
+                        "required_field": attr['field_name'],
+                        "matched_attribute": None,
+                        "confidence": 0.0
+                    })
+        
+        return results 
