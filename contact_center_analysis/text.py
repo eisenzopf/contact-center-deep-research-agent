@@ -249,4 +249,70 @@ Return as JSON with:
             questions_sets,
             batch_size=batch_size,
             process_func=process_questions
-        ) 
+        )
+
+    async def generate_intent(
+        self,
+        text: str
+    ) -> Dict[str, str]:
+        """
+        Generate the primary intent of a customer service conversation.
+        
+        Args:
+            text: The conversation transcript to analyze
+            
+        Returns:
+            Dictionary containing:
+            - label_name: A natural language label (2-3 words) describing the primary intent
+            - label: Machine-readable lowercase version of label_name with underscores
+            - description: Concise description of the customer's primary intent
+        """
+        # Handle empty text case explicitly
+        if not text.strip():
+            return {
+                "label_name": "Unclear Intent",
+                "label": "unclear_intent",
+                "description": "The conversation transcript is unclear or does not contain a discernible customer service request."
+            }
+
+        prompt = f"""You are a helpful AI assistant specializing in classifying customer service conversations.  Your task is to analyze a provided conversation transcript and determine the customer's *primary* intent for contacting customer service.  Focus on the *main reason* the customer initiated the interaction, even if other topics are briefly mentioned.
+
+**Input:** You will receive a conversation transcript as text.
+
+**Output:** You will return a JSON object with the following *exact* keys and data types:
+
+*   **`label_name`**:  (string) A natural language label describing the customer's primary intent.  This label should be 2-3 words *maximum*.  Use title case (e.g., "Update Address", "Cancel Order").
+*   **`label`**: (string) A lowercase version of `label_name`, with underscores replacing spaces (e.g., `update_address`, `cancel_order`).  This should be machine-readable.
+*   **`description`**: (string) A concise description (1-2 sentences) of the customer's primary intent.  Explain the *specific* problem or request the customer is making.
+
+**Important Instructions and Constraints:**
+
+1.  **Primary Intent Focus:**  Identify the *single, most important* reason the customer contacted support.  Ignore minor side issues if they are not the core reason for the interaction.
+2.  **Conciseness:** Keep the `label_name` to 2-3 words and the `description` brief and to the point.
+3.  **JSON Format:**  The output *must* be valid JSON.  Do not include any extra text, explanations, or apologies outside of the JSON object.  Only the JSON object should be returned.
+4.  **Error Handling (Implicit):** If the conversation is incomprehensible, nonsensical, or does not contain a clear customer service request, use the following default output:
+
+    ```json
+    {{
+      "label_name": "Unclear Intent",
+      "label": "unclear_intent",
+      "description": "The conversation transcript is unclear or does not contain a discernible customer service request."
+    }}
+    ```
+5. **Specificity:** Be as specific as possible in the description. Don't just say "billing issue."  Say "The customer is disputing a charge on their latest bill."
+6. **Do not hallucinate information.** Base the classification solely on the provided transcript. Do not invent details.
+7. **Do not respond in a conversational manner.** Your entire response should be only the requested json.
+
+Conversation Transcript:
+{text}"""
+
+        response = await self._generate_content(
+            prompt,
+            expected_format={
+                "label_name": str,
+                "label": str,
+                "description": str
+            }
+        )
+        
+        return response 
