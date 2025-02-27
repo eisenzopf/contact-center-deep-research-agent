@@ -21,7 +21,7 @@ def sample_analysis_results():
             },
             {
                 "question": "How effective are our retention offers?",
-                "answer": "Retention offers are only made in 35% of calls, with 65% receiving no offer at all. The most common offer is a 20% discount (20% of calls).",
+                "answer": "Retention offers are accepted by customers when offered 35% of the time.",
                 "confidence": "Medium",
                 "supporting_data": "In 65% of calls, no retention offer was made to the customer."
             }
@@ -32,19 +32,16 @@ def sample_analysis_results():
                 "name": "Save attempt rate",
                 "value": "25%",
                 "trend": "Declining",
-                "recommendation": "Implement mandatory save attempt protocols"
             },
             {
                 "name": "Price-related cancellations",
                 "value": "45%",
                 "trend": "Increasing",
-                "recommendation": "Review pricing strategy and competitive positioning"
             },
             {
                 "name": "Retention offer rate",
                 "value": "35%",
                 "trend": "Stable",
-                "recommendation": "Increase offer frequency and train agents on effective offer presentation"
             }
         ]
     }
