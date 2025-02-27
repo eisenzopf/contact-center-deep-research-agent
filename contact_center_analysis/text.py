@@ -316,3 +316,39 @@ Conversation Transcript:
         )
         
         return response 
+
+    async def generate_intent_batch(
+        self,
+        conversations: List[Dict[str, str]],
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate primary intents for multiple customer service conversations in parallel.
+        
+        Args:
+            conversations: List of conversation dictionaries, each containing at least:
+                          - 'text': The conversation transcript
+                          - 'id': Optional conversation identifier
+            batch_size: Optional number of conversations to process in each batch
+            
+        Returns:
+            List of dictionaries, each containing:
+            - conversation_id: ID of the conversation (if provided)
+            - intent: Dictionary with label_name, label, and description
+        """
+        async def process_conversation(conversation):
+            conv_text = conversation.get('text', '')
+            conv_id = conversation.get('id', '')
+            
+            intent = await self.generate_intent(text=conv_text)
+            
+            return {
+                "conversation_id": conv_id,
+                "intent": intent
+            }
+            
+        return await self.process_in_batches(
+            conversations,
+            batch_size=batch_size,
+            process_func=process_conversation
+        ) 

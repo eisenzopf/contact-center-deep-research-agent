@@ -344,3 +344,77 @@ async def test_generate_intent_empty_text(llm_debug):
     assert result["label"] == "unclear_intent"
     assert "unclear" in result["description"].lower()
     assert "does not contain" in result["description"].lower() 
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_generate_intent_batch(sample_conversation_csv, llm_debug):
+    """Test batch processing of intent generation for multiple conversations."""
+    
+    generator = TextGenerator(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    # Convert CSV to plain text for processing
+    import csv
+    from io import StringIO
+    
+    # Create the first conversation from the sample CSV
+    conversation_text1 = ""
+    csv_reader = csv.DictReader(StringIO(sample_conversation_csv))
+    for row in csv_reader:
+        speaker_type = row['speaker']
+        text = row['text']
+        conversation_text1 += f"{speaker_type.capitalize()}: {text}\n"
+    
+    # Create a second simplified conversation
+    conversation_text2 = """Agent: Thank you for calling customer support. How can I help you today?
+Customer: Hi, I'd like to update my shipping address for my recent order.
+Agent: I'd be happy to help with that. Can you provide your order number?
+Customer: Yes, it's ABC123456.
+Agent: Thank you. What's the new shipping address?
+Customer: It's 123 Main Street, Apt 4B, New York, NY 10001.
+Agent: I've updated your shipping address. Is there anything else I can help with?
+Customer: No, that's all. Thank you!
+Agent: You're welcome. Have a great day!"""
+    
+    # Create a list of conversations for batch processing
+    conversations = [
+        {"id": "conv1", "text": conversation_text1},
+        {"id": "conv2", "text": conversation_text2},
+        {"id": "conv3", "text": ""}  # Test empty conversation handling
+    ]
+    
+    results = await generator.generate_intent_batch(
+        conversations=conversations,
+        batch_size=2  # Test with small batch size
+    )
+    
+    # Verify results structure
+    assert len(results) == len(conversations)
+    
+    for i, result in enumerate(results):
+        assert "conversation_id" in result
+        assert "intent" in result
+        assert "label_name" in result["intent"]
+        assert "label" in result["intent"]
+        assert "description" in result["intent"]
+        
+        # Verify data types
+        assert isinstance(result["intent"]["label_name"], str)
+        assert isinstance(result["intent"]["label"], str)
+        assert isinstance(result["intent"]["description"], str)
+        
+        # Verify label format
+        assert result["intent"]["label"] == result["intent"]["label_name"].lower().replace(" ", "_")
+        
+        # Verify specific results based on conversation content
+        if i == 0:  # First conversation about debit card issues
+            assert any(term in result["intent"]["label"].lower() for term in 
+                      ["card", "debit", "transaction", "block", "decline"])
+        elif i == 1:  # Second conversation about address update
+            assert any(term in result["intent"]["label"].lower() for term in 
+                      ["address", "shipping", "update", "change"])
+        elif i == 2:  # Empty conversation
+            assert result["intent"]["label_name"] == "Unclear Intent"
+            assert result["intent"]["label"] == "unclear_intent" 
