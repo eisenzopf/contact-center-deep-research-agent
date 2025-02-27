@@ -50,18 +50,44 @@ def sample_analysis_results():
         "answers": [
             {
                 "question": "When customers call to cancel their service, how often do agents try to save the customer?",
-                "answer": "Based on the data, agents attempt to save customers in approximately 85% of cancellation calls.",
+                "answer": "Based on the data, agents attempt to save customers in only 25% of cancellation calls.",
                 "confidence": "High",
-                "supporting_data": "In 17 out of 20 analyzed conversations, agents made explicit save attempts."
+                "supporting_data": "In 75% of analyzed conversations, agents made no explicit save attempts."
             },
             {
                 "question": "What are the most common reasons for cancellation?",
-                "answer": "The most common reason for cancellation is pricing concerns, followed by service quality issues.",
+                "answer": "The most common reason for cancellation is pricing concerns (45%), followed by service quality issues (30%), competitor offers (15%), and no longer needing the service (10%).",
                 "confidence": "Medium",
-                "supporting_data": "45% of customers cited price as their primary reason for cancellation."
+                "supporting_data": "45% of customers cited price as their primary reason for cancellation, while 30% mentioned service quality issues."
+            },
+            {
+                "question": "How effective are our retention offers?",
+                "answer": "Retention offers are only made in 35% of calls, with 65% receiving no offer at all. The most common offer is a 20% discount (20% of calls).",
+                "confidence": "Medium",
+                "supporting_data": "In 65% of calls, no retention offer was made to the customer."
             }
         ],
-        "data_gaps": ["Limited information on retention offer effectiveness"]
+        "data_gaps": ["Limited information on retention offer effectiveness"],
+        "key_metrics": [
+            {
+                "name": "Save attempt rate",
+                "value": "25%",
+                "trend": "Declining",
+                "recommendation": "Implement mandatory save attempt protocols"
+            },
+            {
+                "name": "Price-related cancellations",
+                "value": "45%",
+                "trend": "Increasing",
+                "recommendation": "Review pricing strategy and competitive positioning"
+            },
+            {
+                "name": "Retention offer rate",
+                "value": "35%",
+                "trend": "Stable",
+                "recommendation": "Increase offer frequency and train agents on effective offer presentation"
+            }
+        ]
     }
 
 @pytest.mark.llm_debug

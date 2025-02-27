@@ -52,8 +52,9 @@ Analysis Data:
 
 Please provide:
 1. Specific answers to each question, citing the data
-2. Confidence level (High/Medium/Low) for each answer
-3. Identification of any data gaps
+2. Key metrics (1-2 words or numbers) that quantify the answer when applicable
+3. Confidence level (High/Medium/Low) for each answer
+4. Identification of any data gaps
 
 Format as JSON:
 {{
@@ -61,6 +62,7 @@ Format as JSON:
         {{
             "question": str,
             "answer": str,
+            "key_metrics": [str],  
             "confidence": str,
             "supporting_data": str
         }}
