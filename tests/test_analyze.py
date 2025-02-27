@@ -7,19 +7,32 @@ import json
 def sample_attribute_values():
     return {
         "save_attempt": {
-            "value": "Yes",
+            "distribution": {
+                "Yes": 25,
+                "No": 75
+            },
             "confidence": 0.95,
-            "explanation": "The agent clearly attempted to save the customer by offering discounts."
+            "explanation": "In only 25% of cancellation calls, agents made explicit save attempts."
         },
         "cancellation_reason": {
-            "value": "Price too high",
+            "distribution": {
+                "Price too high": 45,
+                "Service quality issues": 30,
+                "Found better competitor": 15,
+                "No longer need service": 10
+            },
             "confidence": 0.88,
-            "explanation": "Customer explicitly mentioned that the price was too expensive."
+            "explanation": "Price concerns represent the largest segment (45%) of cancellation reasons."
         },
         "retention_offer_made": {
-            "value": "20% discount",
+            "distribution": {
+                "20% discount": 20,
+                "Free month": 10,
+                "Service upgrade": 5,
+                "No offer": 65
+            },
             "confidence": 0.92,
-            "explanation": "Agent offered a 20% discount on the monthly subscription."
+            "explanation": "Agents made retention offers in only 35% of calls, with most calls (65%) receiving no offer."
         }
     }
 
