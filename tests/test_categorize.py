@@ -196,3 +196,35 @@ async def test_is_in_class_batch(sample_intents, cancellation_examples, llm_debu
     assert len(results) == len(all_intents)
     assert isinstance(results, list)
     assert all(isinstance(r, dict) and len(r) == 1 for r in results)
+
+@pytest.mark.llm_debug
+@pytest.mark.asyncio
+async def test_consolidate_labels(llm_debug):
+    """Test consolidation of similar labels."""
+    
+    categorizer = Categorizer(
+        api_key=os.getenv('GEMINI_API_KEY'),
+        debug=llm_debug
+    )
+    
+    labels = [
+        ("cancel subscription", 10),
+        ("end membership", 8),
+        ("terminate service", 5),
+        ("billing question", 12),
+        ("payment issue", 7)
+    ]
+    
+    results = await categorizer.consolidate_labels(
+        labels=labels,
+        max_groups=2
+    )
+    
+    assert len(results) == len(labels)
+    assert isinstance(results, dict)
+    
+    # Check that similar cancellation labels are grouped together
+    cancellation_labels = ["cancel subscription", "end membership", "terminate service"]
+    first_group_label = results[cancellation_labels[0]]
+    for label in cancellation_labels:
+        assert results[label] == first_group_label

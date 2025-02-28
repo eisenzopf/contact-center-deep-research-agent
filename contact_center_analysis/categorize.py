@@ -100,14 +100,14 @@ Rules:
 5. Focus on accuracy over reducing groups
 6. Maximum number of groups: {}
 
-IMPORTANT: Output your response in valid CSV format with exactly these columns:
+IMPORTANT: Output your response as a JSON object with a single field named 'csv_data' containing the CSV data.
+The CSV should have exactly these columns:
 original_label,grouped_label
 
 Example format:
-original_label,grouped_label
-"cancel subscription","Cancel Service"
-"end my membership","Cancel Service"
-"billing help needed","Billing Support"
+{{
+  "csv_data": "original_label,grouped_label\\n\\"cancel subscription\\",\\"Cancel Service\\"\\n\\"end my membership\\",\\"Cancel Service\\"\\n\\"billing help needed\\",\\"Billing Support\\""
+}}
 """.format('\n'.join(f"- {label} ({count})" for label, count in labels), max_groups)
 
         try:
@@ -145,7 +145,8 @@ original_label,grouped_label
     async def process_labels_in_batches(
         self,
         value_distribution: List[Tuple[str, int]],
-        batch_size: Optional[int] = None
+        batch_size: Optional[int] = None,
+        max_groups: int = 100
     ) -> Dict[str, str]:
         """
         Process all labels in batches, maintaining consistent grouping.
@@ -154,6 +155,7 @@ original_label,grouped_label
             value_distribution: List of tuples (value, count)
             batch_size: Optional number of labels to process in each batch. If not provided,
                        will use the default batch size of 200
+            max_groups: Maximum number of consolidated groups to create (default=100)
             
         Returns:
             Dictionary mapping original labels to consolidated labels
@@ -170,7 +172,7 @@ original_label,grouped_label
                 print(f"\nProcessing batch {i//effective_batch_size + 1}/{math.ceil(len(value_distribution)/effective_batch_size)}")
             
             # Get consolidated labels for this batch
-            batch_mapping = await self.consolidate_labels(batch)
+            batch_mapping = await self.consolidate_labels(batch, max_groups=max_groups)
             
             # Update mapping
             final_mapping.update(batch_mapping)
