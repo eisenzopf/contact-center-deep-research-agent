@@ -119,28 +119,34 @@ async def get_required_attributes(api_key, debug=False):
     
     return result["attributes"]
 
-async def generate_attributes_for_conversations(conversations, attributes, api_key, debug=False):
-    """Generate attribute values for multiple conversations."""
+async def generate_attributes_for_conversations(conversations, attributes, api_key, debug=False, batch_size=5):
+    """Generate attribute values for multiple conversations in parallel batches."""
     generator = TextGenerator(api_key=api_key, debug=debug)
     
-    results = []
-    for i, conversation in enumerate(conversations):
-        print(f"\nAnalyzing conversation {i+1}/{len(conversations)}: {conversation['id']}...")
+    async def process_conversation(conversation):
+        print(f"Analyzing conversation: {conversation['id']}...")
         
         attribute_values = await generator.generate_attributes(
             text=conversation['text'],
             attributes=attributes
         )
         
-        results.append({
+        return {
             "conversation_id": conversation['id'],
             "attribute_values": attribute_values
-        })
+        }
+    
+    # Use the process_in_batches method from BaseAnalyzer
+    results = await generator.process_in_batches(
+        conversations,
+        batch_size=batch_size,
+        process_func=process_conversation
+    )
     
     return results
 
-async def compile_attribute_statistics(attribute_results):
-    """Compile statistics on attribute values across conversations."""
+async def compile_attribute_statistics(attribute_results, api_key, debug=False):
+    """Compile statistics on attribute values across conversations with semantic grouping."""
     # Create a structure to hold all values for each attribute
     attribute_values = defaultdict(list)
     
@@ -155,22 +161,49 @@ async def compile_attribute_statistics(attribute_results):
             if confidence >= 0.6:
                 attribute_values[field_name].append(value)
     
-    # Calculate statistics for each attribute
+    # Initialize categorizer for semantic grouping
+    categorizer = Categorizer(api_key=api_key, debug=debug)
+    
+    # Calculate statistics for each attribute with semantic grouping
     statistics = {}
     for field_name, values in attribute_values.items():
-        # Count occurrences of each value
+        # Skip if no values
+        if not values:
+            continue
+            
+        # Convert values to (value, count) format for consolidate_labels
         value_counts = Counter(values)
+        value_distribution = [(value, count) for value, count in value_counts.items()]
+        
+        # Use existing consolidate_labels method to group similar values
+        # Only apply consolidation if we have enough unique values to warrant it
+        if len(value_counts) > 5:
+            print(f"Consolidating {len(value_counts)} unique values for {field_name}...")
+            normalized_mapping = await categorizer.consolidate_labels(
+                labels=value_distribution,
+                max_groups=min(20, len(value_counts))  # Limit groups to 20 or fewer
+            )
+            
+            # Apply the mapping to get normalized values
+            normalized_values = [normalized_mapping.get(value, value) for value in values]
+        else:
+            # For small sets, just use the original values
+            normalized_values = values
+        
+        # Count occurrences of each normalized value
+        normalized_counts = Counter(normalized_values)
         
         # Calculate percentages
         total = len(values)
-        percentages = {value: (count / total) * 100 for value, count in value_counts.items()}
+        percentages = {value: (count / total) * 100 for value, count in normalized_counts.items()}
         
         # Store statistics
         statistics[field_name] = {
             "total_values": total,
-            "unique_values": len(value_counts),
-            "value_counts": dict(value_counts),
-            "percentages": percentages
+            "unique_values": len(normalized_counts),
+            "value_counts": dict(normalized_counts),
+            "percentages": percentages,
+            "raw_values": dict(value_counts)  # Keep original values for reference
         }
     
     return statistics
@@ -202,6 +235,8 @@ async def main():
     parser.add_argument('--examples', nargs='+', help='Example intents for the target class')
     parser.add_argument('--output', help='Optional path to save results as JSON')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--batch-size', type=int, default=5, 
+                        help='Number of conversations to process in parallel (default: 5)')
     
     args = parser.parse_args()
     
@@ -258,17 +293,22 @@ async def main():
     print(f"Found {len(conversations)} conversations for analysis")
     
     # Step 4: Generate attribute values for all conversations
-    print("\nGenerating attribute values for all conversations...")
+    print(f"\nGenerating attribute values for all {len(conversations)} conversations in parallel batches...")
     attribute_results = await generate_attributes_for_conversations(
         conversations,
         required_attributes,
         api_key,
-        args.debug
+        args.debug,
+        batch_size=5  # Process 5 conversations at a time
     )
     
     # Step 5: Compile statistics on attribute values
-    print("\nCompiling attribute statistics...")
-    statistics = await compile_attribute_statistics(attribute_results)
+    print("\nCompiling attribute statistics with semantic grouping...")
+    statistics = await compile_attribute_statistics(
+        attribute_results,
+        api_key,
+        args.debug
+    )
     
     # Print summary statistics
     print("\n=== Attribute Value Statistics ===")
