@@ -7,10 +7,11 @@ import json
 import time
 from contact_center_analysis.text import TextGenerator
 from contact_center_analysis.match import AttributeMatcher
+from contact_center_analysis.categorize import Categorizer
 
 async def get_required_attributes(api_key, debug=False):
     """
-    Get the list of required attributes needed to answer cancellation-related questions.
+    Get the list of required attributes needed to answer fee dispute-related questions.
     
     Args:
         api_key: API key for the TextGenerator
@@ -22,21 +23,164 @@ async def get_required_attributes(api_key, debug=False):
     # Initialize the TextGenerator
     generator = TextGenerator(api_key=api_key, debug=debug)
     
-    # Define research questions about cancellations
+    # Define research questions about fee disputes
     questions = [
-        "When customers call to cancel their service, how often do agents try to save the customer?",
-        "When agents do try to save, how often do they succeed?",
-        "What are things that agents offer that most often retain customers?",
-        "What did the customer say the reason was they were cancelling?"
+        "What are the most common types of fee disputes customers call about?",
+        "How often do agents offer refunds or credits to resolve fee disputes?",
+        "What percentage of fee disputes are resolved in the customer's favor?",
+        "What explanations do agents provide for disputed fees?",
+        "How do agents de-escalate conversations when customers are upset about fees?"
     ]
     
     # Generate required attributes
-    print("Generating required attributes...")
+    print("Generating required attributes for fee dispute analysis...")
     result = await generator.generate_required_attributes(
         questions=questions
     )
     
     return result["attributes"]
+
+async def extract_unique_intents(db_path, min_count=20):
+    """
+    Extract unique intent values from the conversation_attributes table.
+    Only includes intents that appear at least min_count times.
+    
+    Args:
+        db_path: Path to the SQLite database
+        min_count: Minimum count for intents to be considered
+        
+    Returns:
+        List of unique intent dictionaries with 'name' field
+    """
+    # Connect to the database
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Query for unique intent values that appear at least min_count times
+    query = """
+    SELECT value as intent_text, COUNT(*) as count
+    FROM conversation_attributes
+    WHERE type = 'intent'
+    GROUP BY value
+    HAVING COUNT(*) >= ?
+    """
+    
+    cursor.execute(query, (min_count,))
+    # Format intents as dictionaries with 'name' field for Categorizer
+    intents = [{"name": row['intent_text']} for row in cursor.fetchall()]
+    
+    # Close connection
+    conn.close()
+    
+    return intents
+
+async def find_matching_intents(db_path, api_key, target_class, examples=None, min_count=20, debug=False):
+    """
+    Find intents that match a specific target class.
+    
+    Args:
+        db_path: Path to the SQLite database
+        api_key: API key for the Categorizer
+        target_class: The class to classify intents into (e.g., "fee dispute")
+        examples: Optional list of example intents for the target class
+        min_count: Minimum count for intents to be considered
+        debug: Enable debug mode for more verbose output
+        
+    Returns:
+        List of matching intent strings
+    """
+    # Initialize the Categorizer
+    categorizer = Categorizer(api_key=api_key, debug=debug)
+    
+    # Extract unique intents from the database
+    db_intents = await extract_unique_intents(db_path, min_count)
+    
+    print(f"Found {len(db_intents)} unique intents in the database")
+    
+    # If no examples provided, use default examples for fee disputes
+    if not examples:
+        examples = [
+            "Customer disputing a late payment fee",
+            "Customer questioning monthly service charge",
+            "Customer complaining about unexpected fees on bill",
+            "Customer wants fee waived",
+            "Customer says they were charged incorrectly",
+            "Customer asking for refund of fees"
+        ]
+    
+    # Classify the intents using the Categorizer's batch method
+    batch_results = await categorizer.is_in_class_batch(
+        intents=db_intents,
+        target_class=target_class,
+        examples=examples,
+        batch_size=50  # Adjust based on your needs
+    )
+    
+    # Process results to get matching intents
+    matching_intents = []
+    
+    # Process the batch results (list of dictionaries)
+    for result_dict in batch_results:
+        for intent_text, is_match in result_dict.items():
+            if is_match:
+                matching_intents.append(intent_text)
+    
+    print(f"Found {len(matching_intents)} intents matching '{target_class}'")
+    if matching_intents:
+        print("Examples of matching intents:")
+        for intent in matching_intents[:5]:  # Show first 5 examples
+            print(f"  - {intent}")
+    
+    return matching_intents
+
+async def fetch_conversations_by_intents(db_path, matching_intents, limit=5):
+    """
+    Fetch conversations that have intents matching the specified list.
+    
+    Args:
+        db_path: Path to the SQLite database
+        matching_intents: List of intent strings to match
+        limit: Maximum number of conversations to fetch
+        
+    Returns:
+        List of conversation dictionaries
+    """
+    # Connect to the database
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Create placeholders for SQL IN clause
+    placeholders = ', '.join(['?'] * len(matching_intents))
+    
+    # Query for conversations with matching intents
+    query = f"""
+    SELECT c.conversation_id, c.text
+    FROM conversations c
+    JOIN conversation_attributes ca ON c.conversation_id = ca.conversation_id
+    WHERE ca.type = 'intent' AND ca.value IN ({placeholders})
+    AND c.text IS NOT NULL AND LENGTH(c.text) > 100
+    ORDER BY RANDOM()
+    LIMIT ?
+    """
+    
+    # Add limit to the parameters
+    params = matching_intents + [limit]
+    cursor.execute(query, params)
+    
+    # Format conversations as dictionaries
+    conversations = []
+    for row in cursor.fetchall():
+        conversations.append({
+            'id': row['conversation_id'],
+            'text': row['text']
+        })
+    
+    # Close connection
+    conn.close()
+    
+    return conversations
 
 async def fetch_existing_attributes(db_path, min_count=20):
     """
@@ -90,46 +234,6 @@ async def fetch_existing_attributes(db_path, min_count=20):
     conn.close()
     
     return attributes
-
-async def fetch_sample_conversations(db_path, limit=5):
-    """
-    Fetch sample conversations from the database.
-    
-    Args:
-        db_path: Path to the SQLite database
-        limit: Maximum number of conversations to fetch
-        
-    Returns:
-        List of conversation dictionaries
-    """
-    # Connect to the database
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # Query for conversations - using conversation_id instead of id
-    query = """
-    SELECT conversation_id, text
-    FROM conversations
-    WHERE text IS NOT NULL AND LENGTH(text) > 100
-    ORDER BY RANDOM()
-    LIMIT ?
-    """
-    
-    cursor.execute(query, (limit,))
-    
-    # Format conversations as dictionaries
-    conversations = []
-    for row in cursor.fetchall():
-        conversations.append({
-            'id': row['conversation_id'],  # Map conversation_id to id for consistency
-            'text': row['text']
-        })
-    
-    # Close connection
-    conn.close()
-    
-    return conversations
 
 async def match_attributes(required_attributes, existing_attributes, api_key, debug=False, confidence_threshold=0.7):
     """
@@ -234,10 +338,12 @@ async def generate_missing_attributes(conversations, missing_attributes, api_key
 
 async def main():
     """Parse arguments and run the script."""
-    parser = argparse.ArgumentParser(description='Generate values for missing attributes from sample conversations')
+    parser = argparse.ArgumentParser(description='Generate values for missing attributes from fee dispute conversations')
     parser.add_argument('--db', required=True, help='Path to the SQLite database')
     parser.add_argument('--min-count', type=int, default=20, help='Minimum count for attributes to be considered')
     parser.add_argument('--sample-size', type=int, default=3, help='Number of sample conversations to analyze')
+    parser.add_argument('--target-class', default='fee dispute', help='Target class for intent matching (default: "fee dispute")')
+    parser.add_argument('--examples', nargs='+', help='Example intents for the target class')
     parser.add_argument('--output', help='Optional path to save results as JSON')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--threshold', type=float, default=0.7, help='Confidence threshold for attribute matching')
@@ -309,16 +415,39 @@ async def main():
             if 'best_match' in attr and attr['best_match']:
                 print(f"  - Best potential match: {attr['best_match']['field']} (confidence: {attr['best_match']['confidence']:.2f})")
     
-    # Step 4: Fetch sample conversations
+    # Step 4: Find matching intents for the target class
     if missing:
-        print(f"\nFetching {args.sample_size} sample conversations for attribute generation...")
-        conversations = await fetch_sample_conversations(args.db, args.sample_size)
+        print(f"\nFinding intents related to '{args.target_class}'...")
+        matching_intents = await find_matching_intents(
+            db_path=args.db,
+            api_key=api_key,
+            target_class=args.target_class,
+            examples=args.examples,
+            min_count=args.min_count,
+            debug=args.debug
+        )
+        
+        if not matching_intents:
+            print(f"No intents matching '{args.target_class}' were found. Using random conversations instead.")
+            conversations = await fetch_sample_conversations(args.db, args.sample_size)
+        else:
+            # Step 5: Fetch conversations with matching intents
+            print(f"\nFetching {args.sample_size} conversations with '{args.target_class}' intents...")
+            conversations = await fetch_conversations_by_intents(
+                db_path=args.db,
+                matching_intents=matching_intents,
+                limit=args.sample_size
+            )
+            
+            if not conversations:
+                print("No conversations with matching intents found. Using random conversations instead.")
+                conversations = await fetch_sample_conversations(args.db, args.sample_size)
         
         if not conversations:
             print("No conversations found in the database.")
             return
         
-        # Step 5: Generate values for missing attributes
+        # Step 6: Generate values for missing attributes
         print("\nGenerating values for missing attributes...")
         results = await generate_missing_attributes(
             conversations, 
@@ -344,6 +473,7 @@ async def main():
                 "existing_attributes": existing_attributes,
                 "matches": matches,
                 "missing_attributes": missing,
+                "matching_intents": matching_intents,
                 "generated_values": results
             }
             
