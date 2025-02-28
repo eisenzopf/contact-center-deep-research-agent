@@ -63,23 +63,26 @@ async def classify_intents(db_path, api_key, target_class, examples=None, debug=
     
     print(f"Found {len(db_intents)} unique intents in the database")
     
-    # Classify the intents using the Categorizer
+    # Classify the intents using the Categorizer's batch method
     start_time = time.time()
-    classification_results = await categorizer.is_in_class(
+    batch_results = await categorizer.is_in_class_batch(
         intents=db_intents,
         target_class=target_class,
-        examples=examples
+        examples=examples,
+        batch_size=50  # Adjust based on your needs
     )
     
     # Process results
     matching_intents = []
     non_matching_intents = []
     
-    for intent_text, is_match in classification_results.items():
-        if is_match:
-            matching_intents.append(intent_text)
-        else:
-            non_matching_intents.append(intent_text)
+    # Process the batch results (list of dictionaries)
+    for result_dict in batch_results:
+        for intent_text, is_match in result_dict.items():
+            if is_match:
+                matching_intents.append(intent_text)
+            else:
+                non_matching_intents.append(intent_text)
     
     return {
         "matching_intents": matching_intents,
