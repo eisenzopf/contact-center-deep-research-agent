@@ -10,4 +10,6 @@
 #pytest tests/test_text_generator.py::test_generate_intent_batch -v --llm-debug --log-cli-level=DEBUG -W ignore::DeprecationWarning --capture=no
 #pytest tests/test_categorize.py::test_consolidate_labels --llm-debug -v --log-cli-level=DEBUG -W ignore::DeprecationWarning --capture=no
 
-python ./examples/group_intents.py --db /Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db --min-count 20 --debug --max-groups 100 --reduction-factor 0.3 --force-target --show-all
+# Examples
+#python ./examples/group_intents.py --db /Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db --min-count 20 --debug --max-groups 100 --reduction-factor 0.3 --force-target --show-all
+python identify_attributes.py --db customer_service.db --min-count 10 --debug

@@ -191,15 +191,11 @@ Return as JSON with:
         conv_text = conversation.get('text', '')
         conv_id = conversation.get('id', '')
         
-        # Generate values for all attributes in parallel
-        tasks = [
-            self.generate_labeled_attribute(
-                text=conv_text,
-                attribute=attr
-            )
-            for attr in required_attributes
-        ]
-        attribute_values = await asyncio.gather(*tasks)
+        # Use the new generate_attributes function to process all attributes in a single call
+        attribute_values = await self.generate_attributes(
+            text=conv_text,
+            attributes=required_attributes
+        )
         
         return {
             "conversation_id": conv_id,
@@ -351,4 +347,89 @@ Conversation Transcript:
             conversations,
             batch_size=batch_size,
             process_func=process_conversation
-        ) 
+        )
+
+    async def generate_attributes(
+        self,
+        text: str,
+        attributes: List[Dict[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate values for multiple attributes based on text input in a single LLM call.
+        
+        Args:
+            text: The input text to analyze
+            attributes: List of dictionaries, each containing attribute definition with fields:
+                      - field_name: attribute name
+                      - title: Human readable title
+                      - description: Detailed description
+                      - rationale: Why this attribute is needed
+                      
+        Returns:
+            List of dictionaries, each containing:
+            - field_name: The attribute field name
+            - value: Generated value for the attribute
+            - confidence: Confidence score (0-1)
+            - explanation: Explanation of how the value was determined
+        """
+        # Handle empty text case explicitly
+        if not text.strip():
+            return [
+                {
+                    "field_name": attr["field_name"],
+                    "value": "No content",
+                    "confidence": 0.0,
+                    "explanation": "No content was provided for analysis. The text input was empty."
+                }
+                for attr in attributes
+            ]
+        
+        # Handle empty attributes case
+        if not attributes:
+            return []
+        
+        # Format attributes for the prompt
+        attributes_text = "\n\n".join([
+            f"Attribute: {attr['title']}\n"
+            f"Field Name: {attr['field_name']}\n"
+            f"Description: {attr['description']}"
+            for attr in attributes
+        ])
+        
+        prompt = f"""Analyze this text to determine values for the following attributes:
+
+{attributes_text}
+
+Text to analyze:
+{text}
+
+Return a JSON object with this structure:
+{{
+    "attribute_values": [
+        {{
+            "field_name": str,     # Must match one of the field names provided above
+            "value": str,          # The extracted or determined value
+            "confidence": float,   # Confidence score between 0 and 1
+            "explanation": str     # Explanation of how the value was determined
+        }}
+    ]
+}}
+
+Ensure each response is specific to the attribute definition and supported by the text content.
+Include all requested attributes in your response, even if the confidence is low."""
+
+        response = await self._generate_content(
+            prompt,
+            expected_format={
+                "attribute_values": [
+                    {
+                        "field_name": str,
+                        "value": str,
+                        "confidence": float,
+                        "explanation": str
+                    }
+                ]
+            }
+        )
+        
+        return response["attribute_values"] 
