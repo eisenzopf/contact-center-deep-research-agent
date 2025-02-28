@@ -43,7 +43,7 @@ async def extract_intent_distribution(db_path, min_count=1):
     
     return intents
 
-async def consolidate_intents(db_path, api_key, min_count=1, max_groups=100, batch_size=None, debug=False, output=None):
+async def consolidate_intents(db_path, api_key, min_count=1, max_groups=100, batch_size=None, debug=False, output=None, force_target=False, reduction_factor=0.5):
     """
     Consolidate intents from the database using the Categorizer.
     
@@ -55,6 +55,8 @@ async def consolidate_intents(db_path, api_key, min_count=1, max_groups=100, bat
         batch_size: Optional batch size for processing
         debug: Enable debug mode for more verbose output
         output: Optional path to save results as CSV
+        force_target: Force consolidation to reach target number of groups
+        reduction_factor: Controls aggressiveness of consolidation (0.1-0.9, lower is more aggressive)
         
     Returns:
         Dictionary with consolidation results
@@ -67,12 +69,14 @@ async def consolidate_intents(db_path, api_key, min_count=1, max_groups=100, bat
     
     print(f"Found {len(intent_distribution)} unique intents in the database")
     
-    # Consolidate the intents using the Categorizer's batch method
+    # Consolidate the intents using the Categorizer's iterative method
     start_time = time.time()
-    consolidated_mapping = await categorizer.process_labels_in_batches(
+    consolidated_mapping = await categorizer.process_labels_iteratively(
         value_distribution=intent_distribution,
+        target_groups=max_groups,
         batch_size=batch_size,
-        max_groups=max_groups
+        force_target=force_target,
+        reduction_factor=reduction_factor
     )
     
     # Calculate statistics
@@ -107,8 +111,17 @@ async def main():
     parser.add_argument('--batch-size', type=int, help='Optional batch size for processing')
     parser.add_argument('--output', help='Optional path to save results as CSV')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--force-target', action='store_true', help='Force consolidation to reach target number of groups')
+    parser.add_argument('--reduction-factor', type=float, default=0.5, 
+                        help='Controls consolidation aggressiveness (0.1-0.9, lower is more aggressive)')
+    parser.add_argument('--show-all', action='store_true', help='Show all consolidated groups')
     
     args = parser.parse_args()
+    
+    # Validate reduction factor
+    if args.reduction_factor < 0.1 or args.reduction_factor > 0.9:
+        print("Error: reduction-factor must be between 0.1 and 0.9")
+        return
     
     # Get API key from environment variable
     api_key = os.environ.get('GEMINI_API_KEY')
@@ -124,7 +137,9 @@ async def main():
         max_groups=args.max_groups,
         batch_size=args.batch_size,
         debug=args.debug,
-        output=args.output
+        output=args.output,
+        force_target=args.force_target,
+        reduction_factor=args.reduction_factor
     )
     
     # Print results
@@ -133,24 +148,63 @@ async def main():
     print(f"Consolidated groups: {results['consolidated_count']}")
     print(f"Reduction: {results['reduction_percentage']:.1f}%")
     
-    # Print examples of consolidated groups
+    # Organize consolidated groups and calculate total counts for each group
     consolidated_groups = {}
+    group_total_counts = {}
+    
+    # First, group original intents by their consolidated label
     for original, consolidated in results['mapping'].items():
         if consolidated not in consolidated_groups:
             consolidated_groups[consolidated] = []
+            group_total_counts[consolidated] = 0
+        
         consolidated_groups[consolidated].append(original)
-    
-    print("\nExample consolidated groups:")
-    # Print up to 5 groups with their members
-    for i, (group, members) in enumerate(consolidated_groups.items()):
-        if i >= 5:
-            break
-        print(f"\nGroup: {group}")
-        for j, member in enumerate(members):
-            if j >= 5:  # Print up to 5 members per group
-                print(f"  ... and {len(members) - 5} more")
+        
+        # Find the count for this original intent
+        for intent, count in await extract_intent_distribution(args.db, args.min_count):
+            if intent == original:
+                group_total_counts[consolidated] += count
                 break
-            print(f"  - {member}")
+    
+    # Sort groups by their total count (descending)
+    sorted_groups = sorted(consolidated_groups.items(), 
+                          key=lambda x: group_total_counts.get(x[0], 0), 
+                          reverse=True)
+    
+    if args.show_all:
+        print("\nAll Consolidated Groups (sorted by frequency):")
+        for i, (group, members) in enumerate(sorted_groups):
+            total_count = group_total_counts.get(group, 0)
+            print(f"\n{i+1}. {group} (Total: {total_count})")
+            for member in members:
+                # Find the count for this original intent
+                member_count = 0
+                for intent, count in await extract_intent_distribution(args.db, args.min_count):
+                    if intent == member:
+                        member_count = count
+                        break
+                print(f"  - {member} ({member_count})")
+    else:
+        print("\nExample consolidated groups:")
+        # Print up to 5 groups with their members
+        for i, (group, members) in enumerate(sorted_groups):
+            if i >= 5:
+                break
+            total_count = group_total_counts.get(group, 0)
+            print(f"\nGroup: {group} (Total: {total_count})")
+            for j, member in enumerate(members):
+                if j >= 5:  # Print up to 5 members per group
+                    print(f"  ... and {len(members) - 5} more")
+                    break
+                
+                # Find the count for this original intent
+                member_count = 0
+                for intent, count in await extract_intent_distribution(args.db, args.min_count):
+                    if intent == member:
+                        member_count = count
+                        break
+                        
+                print(f"  - {member} ({member_count})")
     
     # Print timing information
     elapsed_time = time.time() - start_time
