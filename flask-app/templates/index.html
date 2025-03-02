@@ -45,17 +45,6 @@
             padding: 12px;
             resize: vertical;
         }
-        #progress-container {
-            max-height: 400px;
-            overflow-y: auto;
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            white-space: pre-wrap;
-            font-family: 'Consolas', monospace;
-            border: 1px solid #e9ecef;
-        }
         .btn-primary {
             background-color: #4a6fdc;
             border-color: #4a6fdc;
@@ -82,12 +71,9 @@
         .progress-bar {
             background-color: #4a6fdc;
         }
-        .user-questions {
-            background-color: #e9ecef;
-            padding: 12px 15px;
+        .step-indicator {
+            font-size: 1.1rem;
             margin-bottom: 15px;
-            border-radius: 8px;
-            font-size: 0.9rem;
         }
     </style>
 </head>
@@ -117,15 +103,10 @@ What percentage of fee disputes result in refunds?"></textarea>
                 </form>
                 
                 <div id="analysis-progress" style="display: none; margin-top: 25px;">
-                    <div id="user-questions" class="user-questions" style="display: none;">
-                        <strong>Your questions:</strong>
-                        <div id="questions-list"></div>
-                    </div>
-                    
-                    <h5 class="mb-3">
+                    <div class="step-indicator">
                         <i class="fas fa-spinner fa-spin me-2"></i>
                         <span id="current-step">Research in Progress</span>
-                    </h5>
+                    </div>
                     
                     <div class="progress mb-3">
                         <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
@@ -146,8 +127,6 @@ What percentage of fee disputes result in refunds?"></textarea>
             const analysisProgress = document.getElementById('analysis-progress');
             const questionsTextarea = document.getElementById('questions-textarea');
             const currentStep = document.getElementById('current-step');
-            const userQuestions = document.getElementById('user-questions');
-            const questionsList = document.getElementById('questions-list');
             
             // Form submit handler
             analysisForm.addEventListener('submit', function(e) {
@@ -164,11 +143,6 @@ What percentage of fee disputes result in refunds?"></textarea>
                 // Disable form and show progress
                 startButton.disabled = true;
                 analysisProgress.style.display = 'block';
-                
-                // Display user questions
-                const userQuestionsArray = questionsText.split('\n').filter(q => q.trim() !== '');
-                questionsList.innerHTML = userQuestionsArray.map(q => `<div>${q}</div>`).join('');
-                userQuestions.style.display = 'block';
                 
                 // Start analysis
                 socket.emit('start_analysis', {
