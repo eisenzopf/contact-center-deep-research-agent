@@ -424,8 +424,16 @@ async def refine_analysis_results(analysis, statistics, api_key, debug=False):
     if "answers" in refined_analysis:
         refined_answers = []
         for answer in refined_analysis["answers"]:
+            # Convert string confidence values to float
+            confidence_value = answer.get("confidence", 0.5)
+            if isinstance(confidence_value, str):
+                # Convert string confidence levels to numeric values
+                confidence_map = {"Low": 0.3, "Medium": 0.5, "High": 0.8, "Very High": 0.9}
+                confidence = confidence_map.get(confidence_value, 0.5)
+            else:
+                confidence = float(confidence_value)
+            
             # Skip answers that already have high confidence
-            confidence = float(answer.get("confidence", 0.5))
             if confidence >= 0.7:
                 refined_answers.append(answer)
                 continue
@@ -479,8 +487,16 @@ async def validate_and_boost_confidence(analysis, statistics, api_key, debug=Fal
     if "answers" in validated_analysis:
         validated_answers = []
         for answer in validated_analysis["answers"]:
+            # Convert string confidence values to float
+            confidence_value = answer.get("confidence", 0.5)
+            if isinstance(confidence_value, str):
+                # Convert string confidence levels to numeric values
+                confidence_map = {"Low": 0.3, "Medium": 0.5, "High": 0.8, "Very High": 0.9}
+                confidence = confidence_map.get(confidence_value, 0.5)
+            else:
+                confidence = float(confidence_value)
+            
             # Skip answers that already have very high confidence
-            confidence = float(answer.get("confidence", 0.5))
             if confidence >= 0.9:
                 validated_answers.append(answer)
                 continue
