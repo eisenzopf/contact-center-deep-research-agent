@@ -483,7 +483,7 @@ async def generate_sentiment_flow(attribute_results, output_dir, api_key=None, d
     # If sentiment is not available and we have an API key, generate it
     if not has_sentiment and api_key:
         print("Customer sentiment attribute not found. Generating sentiment analysis...")
-        from contact_center_analysis.extract import AttributeExtractor
+        from discourse_ai.extract import AttributeExtractor
         from collections import defaultdict
         from contact_center_analysis.categorize import Categorizer
         
@@ -692,7 +692,7 @@ async def generate_resolution_sankey(statistics, attribute_results, output_dir, 
     
     # If attributes are missing and we have an API key, generate them
     if (not has_dispute_type or not has_resolution_outcome) and api_key:
-        from contact_center_analysis.extract import AttributeExtractor
+        from discourse_ai.extract import AttributeExtractor
         from collections import defaultdict
         from contact_center_analysis.categorize import Categorizer
         
@@ -919,7 +919,7 @@ async def generate_action_wordcloud(statistics, attribute_results, output_dir, a
         # If agent_actions is not available and we have an API key, generate it
         if not has_agent_actions and api_key:
             print("Agent actions attribute not found. Generating agent actions analysis...")
-            from contact_center_analysis.extract import AttributeExtractor
+            from discourse_ai.extract import AttributeExtractor
             
             extractor = AttributeExtractor(api_key=api_key, debug=debug)
             categorizer = Categorizer(api_key=api_key, debug=debug)
@@ -1394,6 +1394,230 @@ def generate_interactive_dashboard(analysis_results, statistics, visualizations,
     
     return output_file
 
+async def improve_attribute_consolidation(attribute_results, statistics, api_key, debug=False):
+    """Improve consolidation for attributes with high cardinality."""
+    from contact_center_analysis.categorize import Categorizer
+    from collections import Counter, defaultdict
+    
+    # Identify attributes with poor consolidation (high unique value ratio)
+    poor_consolidation = []
+    for field_name, stats in statistics.items():
+        if stats["total_values"] > 10:  # Only consider attributes with enough data
+            unique_ratio = stats["unique_values"] / stats["total_values"]
+            if unique_ratio > 0.7:  # If more than 70% of values are unique
+                poor_consolidation.append((field_name, unique_ratio))
+    
+    if not poor_consolidation:
+        return attribute_results, statistics
+        
+    # Sort by worst consolidation first
+    poor_consolidation.sort(key=lambda x: x[1], reverse=True)
+    
+    if debug:
+        print(f"Found {len(poor_consolidation)} attributes with poor consolidation:")
+        for field_name, ratio in poor_consolidation:
+            print(f"  - {field_name}: {ratio:.2f} unique ratio")
+    
+    categorizer = Categorizer(api_key=api_key, debug=debug)
+    
+    # Process each attribute with poor consolidation
+    for field_name, _ in poor_consolidation:
+        print(f"Improving consolidation for {field_name}...")
+        
+        # Extract all values for this attribute
+        all_values = []
+        for result in attribute_results:
+            if "error" in result:
+                continue
+                
+            for attr in result.get("attribute_values", []):
+                if attr["field_name"] == field_name:
+                    all_values.append(attr["value"])
+        
+        # Skip if no values
+        if not all_values:
+            continue
+            
+        # Count occurrences
+        value_counts = Counter(all_values)
+        value_distribution = [(value, count) for value, count in value_counts.items()]
+        
+        # Use more aggressive consolidation for highly fragmented attributes
+        max_categories = max(5, min(20, int(len(value_counts) * 0.3)))
+        
+        try:
+            # Try to consolidate with more aggressive parameters
+            normalized_mapping = await categorizer.consolidate_labels(
+                labels=value_distribution,
+                max_groups=max_categories
+            )
+            
+            # Update attribute values with consolidated labels
+            for result in attribute_results:
+                if "error" in result:
+                    continue
+                
+                for attr in result.get("attribute_values", []):
+                    if attr["field_name"] == field_name and attr["value"] in normalized_mapping:
+                        attr["value"] = normalized_mapping[attr["value"]]
+            
+            # Update statistics for this attribute
+            updated_values = []
+            for result in attribute_results:
+                if "error" in result:
+                    continue
+                    
+                for attr in result.get("attribute_values", []):
+                    if attr["field_name"] == field_name:
+                        updated_values.append(attr["value"])
+            
+            updated_counts = Counter(updated_values)
+            total = len(updated_values)
+            percentages = {value: (count / total) * 100 for value, count in updated_counts.items()}
+            
+            statistics[field_name] = {
+                "total_values": total,
+                "unique_values": len(updated_counts),
+                "value_counts": dict(updated_counts),
+                "percentages": percentages,
+                "raw_values": dict(value_counts)  # Keep original values for reference
+            }
+            
+            if debug:
+                print(f"  Reduced from {len(value_counts)} to {len(updated_counts)} unique values")
+                
+        except Exception as e:
+            if debug:
+                print(f"Error consolidating {field_name}: {e}")
+    
+    return attribute_results, statistics
+
+async def analyze_attribute_relationships(statistics, attribute_results, api_key, debug=False):
+    """Analyze relationships between different attributes."""
+    from collections import defaultdict, Counter
+    
+    # Create a mapping of conversation_id to attributes
+    conversation_attributes = {}
+    
+    for result in attribute_results:
+        if "error" in result:
+            continue
+            
+        conv_id = result.get("conversation_id", "unknown")
+        conversation_attributes[conv_id] = {}
+        
+        for attr in result.get("attribute_values", []):
+            conversation_attributes[conv_id][attr["field_name"]] = attr["value"]
+    
+    # Find the most common attributes to analyze
+    common_attributes = []
+    for field_name, stats in statistics.items():
+        if stats["total_values"] > len(conversation_attributes) * 0.5:  # Present in at least 50% of conversations
+            common_attributes.append(field_name)
+    
+    if len(common_attributes) < 2:
+        if debug:
+            print("Not enough common attributes for relationship analysis")
+        return None
+    
+    # Analyze relationships between pairs of attributes
+    relationships = {}
+    for i, attr1 in enumerate(common_attributes):
+        for attr2 in common_attributes[i+1:]:
+            # Count co-occurrences
+            attr_pairs = defaultdict(Counter)
+            
+            for attrs in conversation_attributes.values():
+                if attr1 in attrs and attr2 in attrs:
+                    attr_pairs[attrs[attr1]][attrs[attr2]] += 1
+            
+            # Only include if we have meaningful data
+            if attr_pairs:
+                relationships[f"{attr1}_to_{attr2}"] = {
+                    k: dict(v) for k, v in attr_pairs.items()
+                }
+    
+    return relationships
+
+async def resolve_data_gaps_dynamically(analysis, attribute_results, api_key, debug=False):
+    """Dynamically identify and resolve specific data gaps."""
+    # Check if we have any data gaps to resolve
+    if "data_gaps" not in analysis or not analysis["data_gaps"]:
+        return attribute_results
+    
+    # Use the existing DataAnalyzer class instead of trying to import AttributeExtractor
+    analyzer = DataAnalyzer(api_key=api_key, debug=debug)
+    
+    # Analyze gaps to determine what attributes we need to extract
+    needed_attributes = []
+    for gap in analysis["data_gaps"]:
+        # Extract key terms from the gap description
+        gap_terms = gap.lower().split()
+        
+        # Define potential attributes based on gap description
+        if any(term in gap_terms for term in ["de-escalation", "technique", "calm"]):
+            needed_attributes.append({
+                "name": "de_escalation_techniques",
+                "description": "Specific techniques used by agents to calm upset customers",
+                "examples": [
+                    "Active listening", "Empathy statements", "Offering solutions",
+                    "Acknowledging frustration", "Providing clear explanations"
+                ]
+            })
+        
+        elif any(term in gap_terms for term in ["explanation", "reason", "rationale"]):
+            needed_attributes.append({
+                "name": "fee_explanations",
+                "description": "Explanations provided by agents for why fees were charged",
+                "examples": [
+                    "Terms and conditions", "Policy requirement", "Service usage",
+                    "Account type requirement", "Regulatory requirement"
+                ]
+            })
+        
+        elif any(term in gap_terms for term in ["satisfaction", "customer", "happy"]):
+            needed_attributes.append({
+                "name": "customer_satisfaction",
+                "description": "Indication of customer satisfaction with the resolution",
+                "examples": [
+                    "Satisfied", "Dissatisfied", "Neutral", 
+                    "Initially dissatisfied but ultimately satisfied",
+                    "Remained dissatisfied despite resolution attempt"
+                ]
+            })
+    
+    # Extract the needed attributes
+    for attribute in needed_attributes:
+        print(f"Extracting {attribute['name']} to resolve data gap...")
+        
+        for i, result in enumerate(attribute_results):
+            if "error" in result or "conversation_text" not in result:
+                continue
+                
+            try:
+                if debug and i % 10 == 0:
+                    print(f"Processing conversation {i+1}/{len(attribute_results)}...")
+                
+                # Use the analyzer to extract the attribute
+                extracted = await analyzer.extract_attribute(
+                    conversation_text=result["conversation_text"],
+                    attribute=attribute
+                )
+                
+                if "attribute_values" not in result:
+                    result["attribute_values"] = []
+                    
+                result["attribute_values"].append({
+                    "field_name": attribute["name"],
+                    "value": extracted["value"],
+                    "confidence": extracted.get("confidence", 0.8)
+                })
+            except Exception as e:
+                if debug:
+                    print(f"Error extracting {attribute['name']}: {e}")
+    
+    return attribute_results
+
 async def main():
     """Parse arguments and run the script."""
     parser = argparse.ArgumentParser(description='Analyze fee dispute conversations')
@@ -1497,22 +1721,20 @@ async def main():
         args.debug
     )
     
-    # Print summary statistics
-    print("\n=== Attribute Value Statistics ===")
-    for field_name, stats in statistics.items():
-        attr = next((a for a in required_attributes if a['field_name'] == field_name), None)
-        title = attr['title'] if attr else field_name
-        
-        print(f"\n{title} ({field_name}):")
-        print(f"  Total values: {stats['total_values']}")
-        print(f"  Unique values: {stats['unique_values']}")
-        print("  Top values:")
-        
-        # Sort by count and show top 5
-        top_values = sorted(stats['value_counts'].items(), key=lambda x: x[1], reverse=True)[:5]
-        for value, count in top_values:
-            percentage = stats['percentages'][value]
-            print(f"    - {value}: {count} ({percentage:.1f}%)")
+    # Add the new function to improve attribute consolidation
+    attribute_results, statistics = await improve_attribute_consolidation(
+        attribute_results=attribute_results,
+        statistics=statistics,
+        api_key=api_key,
+        debug=args.debug
+    )
+    
+    # After compiling attribute statistics
+    statistics = await compile_attribute_statistics(
+        attribute_results,
+        api_key,
+        args.debug
+    )
     
     # After Step 5 (compile statistics) and before Step 6 (analyze findings)
     print("\nExtracting detailed insights from attribute values...")
@@ -1531,52 +1753,84 @@ async def main():
         questions,
         api_key,
         args.debug,
-        detailed_insights  # Pass the detailed insights
+        detailed_insights
     )
 
+    # Add cross-attribute relationship analysis
+    relationships = await analyze_attribute_relationships(
+        statistics,
+        attribute_results,
+        api_key,
+        args.debug
+    )
+    
+    if relationships:
+        print("\nAnalyzing relationships between attributes...")
+        for rel_name, rel_data in relationships.items():
+            attr1, attr2 = rel_name.split("_to_")
+            print(f"  - Found relationship between {attr1} and {attr2}")
+        
+        # Add relationships to analysis results
+        analysis["attribute_relationships"] = relationships
+    
     # Print analysis results
-    print("\n=== Analysis Results ===")
-    if "answers" in analysis:
-        for answer in analysis["answers"]:
-            print(f"\nQuestion: {answer['question']}")
-            print(f"Answer: {answer['answer']}")
-            print(f"Key Metrics: {', '.join(answer['key_metrics'])}")
-            print(f"Confidence: {answer['confidence']}")
-            print(f"Supporting Data: {answer['supporting_data']}")
-
+    print("\n=== Analysis Results ===\n")
+    for i, answer in enumerate(analysis.get("answers", [])):
+        print(f"Question: {answer['question']}")
+        print(f"Answer: {answer['answer']}")
+        print(f"Key Metrics: {', '.join(answer.get('key_metrics', []))}")
+        print(f"Confidence: {answer.get('confidence', 'Medium')}")
+        print(f"Supporting Data: {answer.get('supporting_data', 'N/A')}")
+        print()
+    
+    # Print data gaps
     if "data_gaps" in analysis and analysis["data_gaps"]:
-        print("\nData Gaps Identified:")
+        print("Data Gaps Identified:")
         for gap in analysis["data_gaps"]:
             print(f"  - {gap}")
-
-    # After the initial analysis
-    print("\nChecking for data gaps and enhancing analysis...")
-    # Create the analyzer instance
-    analyzer = DataAnalyzer(api_key=api_key, debug=args.debug)
-    enhanced_analysis = await analyzer.resolve_data_gaps(
-        analysis_results=analysis,
+        print()
+    
+    # Use the new function to resolve data gaps dynamically
+    print("Checking for data gaps and enhancing analysis...")
+    enhanced_attribute_results = await resolve_data_gaps_dynamically(
+        analysis=analysis,
         attribute_results=attribute_results,
-        statistics=statistics,
-        questions=questions,
-        detailed_insights=detailed_insights,
-        max_iterations=args.max_gap_iterations
+        api_key=api_key,
+        debug=args.debug
     )
-
+    
+    # Recompile statistics with the enhanced attributes
+    enhanced_statistics = await compile_attribute_statistics(
+        attribute_results=enhanced_attribute_results,
+        api_key=api_key,
+        debug=args.debug
+    )
+    
+    # Re-analyze with the enhanced data
+    enhanced_analysis = await analyze_attribute_findings(
+        statistics=enhanced_statistics,
+        questions=questions,
+        api_key=api_key,
+        debug=args.debug,
+        detailed_insights=detailed_insights
+    )
+    
     # Print enhanced analysis results
-    print("\n=== Enhanced Analysis Results ===")
-    if "answers" in enhanced_analysis:
-        for answer in enhanced_analysis["answers"]:
-            print(f"\nQuestion: {answer['question']}")
-            print(f"Answer: {answer['answer']}")
-            print(f"Key Metrics: {', '.join(answer['key_metrics'])}")
-            print(f"Confidence: {answer['confidence']}")
-            print(f"Supporting Data: {answer['supporting_data']}")
-
-    # Print any remaining data gaps
+    print("\n=== Enhanced Analysis Results ===\n")
+    for i, answer in enumerate(enhanced_analysis.get("answers", [])):
+        print(f"Question: {answer['question']}")
+        print(f"Answer: {answer['answer']}")
+        print(f"Key Metrics: {', '.join(answer.get('key_metrics', []))}")
+        print(f"Confidence: {answer.get('confidence', 'Medium')}")
+        print(f"Supporting Data: {answer.get('supporting_data', 'N/A')}")
+        print()
+    
+    # Print remaining data gaps
     if "data_gaps" in enhanced_analysis and enhanced_analysis["data_gaps"]:
-        print("\nRemaining Data Gaps:")
+        print("Remaining Data Gaps:")
         for gap in enhanced_analysis["data_gaps"]:
             print(f"  - {gap}")
+        print()
     
     # Save results to file if requested
     if args.output:
