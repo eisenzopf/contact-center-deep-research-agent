@@ -724,6 +724,7 @@ async def generate_resolution_sankey(statistics, attribute_results, output_dir, 
         
         # Extract attributes for each conversation
         generated_values = defaultdict(list)
+        
         for i, result in enumerate(attribute_results):
             if "error" in result or "conversation_text" not in result:
                 continue
@@ -755,87 +756,48 @@ async def generate_resolution_sankey(statistics, attribute_results, output_dir, 
         categorizer = Categorizer(api_key=api_key, debug=debug)
         
         for attr_name, values in generated_values.items():
-            if not values:
-                continue
+            value_counts = Counter(values)
+            value_distribution = [(value, count) for value, count in value_counts.items()]
+            
+            if len(value_counts) > 5:
+                print(f"Consolidating {len(value_counts)} unique values for {attr_name}...")
+                normalized_mapping = await categorizer.consolidate_labels(
+                    labels=value_distribution,
+                    max_groups=min(10, len(value_counts))
+                )
                 
-            print(f"Consolidating values for {attr_name}...")
-            
-            # Convert to (value, count) format for consolidate_labels
-            value_counts = defaultdict(int)
-            for value in values:
-                value_counts[value] += 1
-            
-            value_count_pairs = [(value, count) for value, count in value_counts.items()]
-            
-            # Consolidate similar labels
-            consolidated = await categorizer.consolidate_labels(
-                field_name=attr_name,
-                values=value_count_pairs,
-                max_categories=10
-            )
-            
-            # Create a mapping from original values to consolidated ones
-            value_mapping = {}
-            for original, count in value_count_pairs:
-                for category, items in consolidated.items():
-                    if any(item[0] == original for item in items):
-                        value_mapping[original] = category
-                        break
-            
-            # Update the attribute values with consolidated labels
-            for result in attribute_results:
-                if "error" in result:
-                    continue
-                
-                for attr in result.get("attribute_values", []):
-                    if attr["field_name"] == attr_name and attr["value"] in value_mapping:
-                        attr["value"] = value_mapping[attr["value"]]
-        
-        # Recompile statistics with the new attributes
-        from collections import Counter
-        
-        for attr_name in ['dispute_type', 'resolution_outcome']:
-            if attr_name not in statistics and attr_name in generated_values:
-                values = []
+                # Apply the mapping to the attribute values
                 for result in attribute_results:
                     if "error" in result:
                         continue
                     
                     for attr in result.get("attribute_values", []):
-                        if attr["field_name"] == attr_name:
-                            values.append(attr["value"])
-                
-                if values:
-                    value_counts = Counter(values)
-                    statistics[attr_name] = {
-                        "total_values": len(values),
-                        "unique_values": len(value_counts),
-                        "value_counts": dict(value_counts)
-                    }
+                        if attr["field_name"] == attr_name and attr["value"] in normalized_mapping:
+                            attr["value"] = normalized_mapping[attr["value"]]
     
-    # Check if we have the required data after generation attempts
-    if 'dispute_type' not in statistics or 'resolution_outcome' not in statistics:
-        print("Warning: Cannot generate Sankey diagram - missing required attributes")
+    # Create flow matrix between dispute types and outcomes
+    # Get top dispute types (limit to top 5 for readability)
+    if 'dispute_type' in statistics:
+        top_disputes = [item[0] for item in sorted(
+            statistics['dispute_type']['value_counts'].items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:5]]
+    else:
+        print("Warning: No dispute type data available for Sankey diagram")
         return None
     
-    # Create a matrix of dispute type to resolution outcome
-    dispute_types = list(statistics['dispute_type']['value_counts'].keys())
-    outcomes = list(statistics['resolution_outcome']['value_counts'].keys())
-    
-    # Limit to top 5 dispute types and all outcomes for readability
-    if len(dispute_types) > 5:
-        top_disputes = sorted(
-            dispute_types, 
-            key=lambda x: statistics['dispute_type']['value_counts'][x], 
-            reverse=True
-        )[:5]
+    # Get all outcomes
+    if 'resolution_outcome' in statistics:
+        outcomes = list(statistics['resolution_outcome']['value_counts'].keys())
     else:
-        top_disputes = dispute_types
+        print("Warning: No resolution outcome data available for Sankey diagram")
+        return None
     
-    # Create a flow matrix
+    # Create flow matrix
     flow_matrix = np.zeros((len(top_disputes), len(outcomes)))
     
-    # Count flows from dispute types to outcomes
+    # Fill the matrix
     for result in attribute_results:
         if "error" in result:
             continue
@@ -855,10 +817,11 @@ async def generate_resolution_sankey(statistics, attribute_results, output_dir, 
             flow_matrix[dispute_idx, outcome_idx] += 1
     
     # Create the Sankey diagram
-    fig, ax = plt.figure(figsize=(12, 8)), plt.subplot(111)
+    fig, ax = plt.subplots(figsize=(12, 8))
     
-    # Create a Sankey diagram
-    sankey = Sankey(ax=ax, scale=0.01, offset=0.2, head_angle=120, margin=0.4, gap=0.05)
+    # Create a Sankey diagram with adjusted parameters
+    # Increase gap and adjust other parameters to prevent overlap
+    sankey = Sankey(ax=ax, scale=0.01, offset=0.2, head_angle=120, margin=0.4, gap=0.1, radius=0.05)
     
     # Add the first stage (dispute types)
     dispute_totals = flow_matrix.sum(axis=1)
@@ -892,146 +855,77 @@ async def generate_resolution_sankey(statistics, attribute_results, output_dir, 
                 )
     
     # Finish the diagram
-    sankey.finish()
-    ax.set_title('Flow from Dispute Types to Resolution Outcomes')
-    ax.axis('off')
-    
-    # Save the figure
-    filename = f"{output_dir}/dispute_resolution_flow.png"
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.close()
-    
-    return filename
+    try:
+        sankey.finish()
+        plt.title('Flow from Dispute Types to Resolution Outcomes')
+        plt.tight_layout()
+        
+        # Save the figure
+        os.makedirs(output_dir, exist_ok=True)
+        filename = f"{output_dir}/resolution_sankey.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return filename
+    except ValueError as e:
+        # If we still get an error, try with even more conservative parameters
+        if debug:
+            print(f"Error creating Sankey diagram: {e}")
+            print("Trying with more conservative parameters...")
+        
+        # Create a simpler version without connecting flows
+        plt.figure(figsize=(10, 6))
+        plt.bar(top_disputes, dispute_totals, color='#1f77b4')
+        plt.title('Top Dispute Types')
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        
+        # Save the figure
+        os.makedirs(output_dir, exist_ok=True)
+        filename = f"{output_dir}/dispute_types_bar.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return filename
 
 async def generate_action_wordcloud(statistics, attribute_results, output_dir, api_key=None, debug=False):
-    """Generate word cloud of agent actions during fee disputes."""
+    """Generate word cloud visualization of common agent actions."""
+    import matplotlib.pyplot as plt
+    import os
+    
     try:
-        import matplotlib.pyplot as plt
-        from wordcloud import WordCloud
-        import os
-        from collections import defaultdict
-        from contact_center_analysis.categorize import Categorizer
+        # Try to import wordcloud, but provide a fallback if not available
+        try:
+            from wordcloud import WordCloud
+        except ImportError:
+            print("WordCloud package not installed. Installing...")
+            import subprocess
+            subprocess.check_call(["pip", "install", "wordcloud"])
+            from wordcloud import WordCloud
         
-        # Check if agent_actions is available in the statistics
-        has_agent_actions = 'agent_actions' in statistics
-        
-        # If agent_actions is not available and we have an API key, generate it
-        if not has_agent_actions and api_key:
-            print("Agent actions attribute not found. Generating agent actions analysis...")
-            from discourse_ai.extract import AttributeExtractor
-            
-            extractor = AttributeExtractor(api_key=api_key, debug=debug)
-            categorizer = Categorizer(api_key=api_key, debug=debug)
-            
-            # Define the agent_actions attribute
-            agent_actions_attribute = {
-                "name": "agent_actions",
-                "description": "Actions taken by the agent to resolve the fee dispute",
-                "examples": [
-                    "Fee waiver", "Refund issued", "Explanation provided", 
-                    "Alternative account suggested", "Escalated to supervisor"
-                ]
-            }
-            
-            # Extract agent actions for each conversation
-            agent_actions_values = []
-            
-            for i, result in enumerate(attribute_results):
-                if "error" in result or "conversation_text" not in result:
-                    continue
-                    
-                try:
-                    print(f"Generating agent actions for conversation {i+1}/{len(attribute_results)}...")
-                    actions_result = await extractor.extract_attribute(
-                        conversation_text=result["conversation_text"],
-                        attribute=agent_actions_attribute
-                    )
-                    
-                    # Add agent actions to attribute values
-                    if "attribute_values" not in result:
-                        result["attribute_values"] = []
-                        
-                    result["attribute_values"].append({
-                        "field_name": "agent_actions",
-                        "value": actions_result["value"],
-                        "confidence": actions_result.get("confidence", 0.8)
-                    })
-                    
-                    agent_actions_values.append(actions_result["value"])
-                    has_agent_actions = True
-                except Exception as e:
-                    if debug:
-                        print(f"Error generating agent actions: {e}")
-            
-            # Apply semantic grouping to the agent actions values
-            if agent_actions_values:
-                print("Consolidating agent actions values with semantic grouping...")
-                
-                # Convert to (value, count) format for consolidate_labels
-                value_counts = defaultdict(int)
-                for value in agent_actions_values:
-                    value_counts[value] += 1
-                
-                value_count_pairs = [(value, count) for value, count in value_counts.items()]
-                
-                # Consolidate similar labels
-                consolidated = await categorizer.consolidate_labels(
-                    field_name="agent_actions",
-                    values=value_count_pairs,
-                    max_categories=30  # Allow more categories for agent actions
-                )
-                
-                # Create a mapping from original values to consolidated ones
-                value_mapping = {}
-                for original, count in value_count_pairs:
-                    for category, items in consolidated.items():
-                        if any(item[0] == original for item in items):
-                            value_mapping[original] = category
-                            break
-                
-                # Update the attribute values with consolidated labels
-                for result in attribute_results:
-                    if "error" in result:
-                        continue
-                    
-                    for attr in result.get("attribute_values", []):
-                        if attr["field_name"] == "agent_actions" and attr["value"] in value_mapping:
-                            attr["value"] = value_mapping[attr["value"]]
-                
-                # Update statistics with the newly generated agent actions
-                from collections import Counter
-                
-                # Collect all values for agent_actions
-                all_values = []
-                for result in attribute_results:
-                    if "error" in result:
-                        continue
-                    
-                    for attr in result.get("attribute_values", []):
-                        if attr["field_name"] == "agent_actions":
-                            all_values.append(attr["value"])
-                
-                # Calculate statistics
-                value_counts = Counter(all_values)
-                total_values = len(all_values)
-                unique_values = len(value_counts)
-                
-                # Create statistics entry
-                statistics["agent_actions"] = {
-                    "total_values": total_values,
-                    "unique_values": unique_values,
-                    "value_counts": dict(value_counts),
-                    "percentages": {k: (v / total_values) * 100 for k, v in value_counts.items()}
-                }
-        
-        # If we still don't have agent actions data, return None
-        if not has_agent_actions:
-            print("Warning: Cannot generate agent actions word cloud - no data available")
+        # Check if agent_actions is available in the data
+        if 'agent_actions' not in statistics:
+            if debug:
+                print("Agent actions attribute not found for word cloud")
             return None
         
-        # Create the word cloud
-        actions_text = " ".join(statistics['agent_actions']['value_counts'].keys())
+        # Get all agent actions
+        actions = []
+        for result in attribute_results:
+            if "error" in result:
+                continue
+                
+            for attr in result.get("attribute_values", []):
+                if attr["field_name"] == "agent_actions":
+                    actions.append(attr["value"])
+        
+        if not actions:
+            if debug:
+                print("No agent actions found for word cloud")
+            return None
+            
+        # Combine all actions into a single text
+        actions_text = " ".join(actions)
         
         # Clean up the text
         # Remove common words that don't add meaning
@@ -1051,12 +945,13 @@ async def generate_action_wordcloud(statistics, attribute_results, output_dir, a
         ).generate(actions_text)
         
         # Create the figure
-        fig, ax = plt.figure(figsize=(10, 6)), plt.subplot(111)
-        ax.imshow(wordcloud, interpolation='bilinear')
-        ax.set_title('Common Agent Actions in Fee Disputes')
-        ax.axis('off')
+        plt.figure(figsize=(10, 6))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.title('Common Agent Actions in Fee Disputes')
+        plt.axis('off')
         
         # Save the figure
+        os.makedirs(output_dir, exist_ok=True)
         filename = f"{output_dir}/agent_actions_wordcloud.png"
         plt.tight_layout()
         plt.savefig(filename)
@@ -1081,152 +976,111 @@ def generate_interactive_dashboard(analysis_results, statistics, visualizations,
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Fee Dispute Analysis Dashboard</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
-            body { padding-top: 20px; }
-            .card { margin-bottom: 20px; }
-            .visualization-img { max-width: 100%; height: auto; }
-            .nav-pills .nav-link.active { background-color: #0d6efd; }
-            .tab-content { padding-top: 20px; }
-            .confidence-high { color: green; }
-            .confidence-medium { color: orange; }
-            .confidence-low { color: red; }
-            .data-gap { background-color: #f8f9fa; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+            body {{ padding-top: 20px; }}
+            .visualization-img {{ max-width: 100%; height: auto; }}
+            .card {{ height: 100%; }}
+            .accordion-button:not(.collapsed) {{ background-color: #e7f1ff; }}
         </style>
     </head>
     <body>
         <div class="container">
             <h1 class="mb-4">Fee Dispute Analysis Dashboard</h1>
-            <p class="text-muted">Generated on {date}</p>
+            <p class="text-muted">Generated on: {date}</p>
             
-            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="pills-summary-tab" data-bs-toggle="pill" 
-                            data-bs-target="#pills-summary" type="button" 
-                            aria-controls="pills-summary" aria-selected="true">Summary</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="pills-visualizations-tab" data-bs-toggle="pill" 
-                            data-bs-target="#pills-visualizations" type="button" role="tab" 
-                            aria-controls="pills-visualizations" aria-selected="false">Visualizations</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="pills-data-tab" data-bs-toggle="pill" 
-                            data-bs-target="#pills-data" type="button" role="tab" 
-                            aria-controls="pills-data" aria-selected="false">Data</button>
-                </li>
-            </ul>
-            
-            <div class="tab-content" id="pills-tabContent">
-                <!-- Summary Tab -->
-                <div class="tab-pane fade show active" id="pills-summary" role="tabpanel" 
-                     aria-labelledby="pills-summary-tab">
-                    <div class="row">
-                        <div class="col-md-8">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h5>Analysis Results</h5>
-                                </div>
-                                <div class="card-body">
-                                    {analysis_results}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h5>Data Gaps</h5>
-                                </div>
-                                <div class="card-body">
-                                    {data_gaps}
-                                </div>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">
-                                    <h5>Key Metrics</h5>
-                                </div>
-                                <div class="card-body">
-                                    <canvas id="confidenceChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Visualizations Tab -->
-                <div class="tab-pane fade" id="pills-visualizations" role="tabpanel" 
-                     aria-labelledby="pills-visualizations-tab">
-                    <div class="row">
-                        {visualization_cards}
-                    </div>
-                </div>
-                
-                <!-- Data Tab -->
-                <div class="tab-pane fade" id="pills-data" role="tabpanel" 
-                     aria-labelledby="pills-data-tab">
+            <div class="row mb-4">
+                <div class="col-12">
                     <div class="card">
                         <div class="card-header">
-                            <h5>Attribute Statistics</h5>
+                            <h4>Analysis Results</h4>
                         </div>
                         <div class="card-body">
-                            <div class="accordion" id="statisticsAccordion">
-                                {statistics_accordion}
-                            </div>
+                            {analysis_results}
                         </div>
                     </div>
                 </div>
             </div>
+            
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h4>Data Gaps</h4>
+                        </div>
+                        <div class="card-body">
+                            {data_gaps}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <h2 class="mb-3">Visualizations</h2>
+            <div class="row">
+                {visualization_cards}
+            </div>
+            
+            <h2 class="mb-3 mt-4">Attribute Statistics</h2>
+            <div class="accordion" id="statisticsAccordion">
+                {statistics_accordion}
+            </div>
+            
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h4>Confidence by Question</h4>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="confidenceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <footer class="mt-5 text-center text-muted">
+                <p>Generated using Contact Center Analysis Tool</p>
+            </footer>
         </div>
         
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-            // Confidence chart
-            const confidenceCtx = document.getElementById('confidenceChart').getContext('2d');
-            const confidenceChart = new Chart(confidenceCtx, {
+            // Create confidence chart
+            const ctx = document.getElementById('confidenceChart').getContext('2d');
+            const confidenceChart = new Chart(ctx, {{
                 type: 'bar',
-                data: {
+                data: {{
                     labels: {confidence_labels},
-                    datasets: [{
+                    datasets: [{{
                         label: 'Confidence Level',
                         data: {confidence_values},
                         backgroundColor: [
                             'rgba(255, 99, 132, 0.2)',
-                            'rgba(255, 159, 64, 0.2)',
-                            'rgba(255, 205, 86, 0.2)',
+                            'rgba(54, 162, 235, 0.2)',
+                            'rgba(255, 206, 86, 0.2)',
                             'rgba(75, 192, 192, 0.2)',
-                            'rgba(54, 162, 235, 0.2)'
+                            'rgba(153, 102, 255, 0.2)'
                         ],
                         borderColor: [
-                            'rgb(255, 99, 132)',
-                            'rgb(255, 159, 64)',
-                            'rgb(255, 205, 86)',
-                            'rgb(75, 192, 192)',
-                            'rgb(54, 162, 235)'
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(255, 206, 86, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(153, 102, 255, 1)'
                         ],
                         borderWidth: 1
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    scales: {
-                        x: {
+                    }}]
+                }},
+                options: {{
+                    scales: {{
+                        y: {{
                             beginAtZero: true,
-                            max: 3,
-                            ticks: {
-                                callback: function(value) {
-                                    return ['', 'Low', 'Medium', 'High'][value];
-                                }
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    }
-                }
-            });
+                            max: 1.0
+                        }}
+                    }}
+                }}
+            }});
         </script>
     </body>
     </html>
@@ -1236,42 +1090,44 @@ def generate_interactive_dashboard(analysis_results, statistics, visualizations,
     analysis_html = ""
     confidence_labels = []
     confidence_values = []
-    confidence_map = {"Low": 1, "Medium": 2, "High": 3}
     
-    if "answers" in analysis_results:
-        for answer in analysis_results["answers"]:
-            question = answer.get("question", "")
-            answer_text = answer.get("answer", "")
-            confidence = answer.get("confidence", "Medium")
-            key_metrics = answer.get("key_metrics", [])
-            
-            confidence_class = f"confidence-{confidence.lower()}"
-            confidence_labels.append(question[:30] + "..." if len(question) > 30 else question)
-            confidence_values.append(confidence_map.get(confidence, 2))
-            
-            analysis_html += f"""
-            <div class="mb-4">
-                <h5>{question}</h5>
-                <p>{answer_text}</p>
-                <p><strong>Key Metrics:</strong> {', '.join(key_metrics)}</p>
-                <p><strong>Confidence:</strong> <span class="{confidence_class}">{confidence}</span></p>
+    for answer in analysis_results.get("answers", []):
+        question = answer.get("question", "")
+        answer_text = answer.get("answer", "")
+        confidence = answer.get("confidence", "Medium")
+        confidence_value = {"High": 0.9, "Medium": 0.6, "Low": 0.3}.get(confidence, 0.5)
+        
+        confidence_labels.append(question)
+        confidence_values.append(confidence_value)
+        
+        analysis_html += f"""
+        <div class="mb-4">
+            <h5>{question}</h5>
+            <p>{answer_text}</p>
+            <div class="d-flex justify-content-between">
+                <span class="badge bg-primary">Confidence: {confidence}</span>
+                <span class="badge bg-secondary">Key Metrics: {', '.join(answer.get('key_metrics', []))}</span>
             </div>
-            """
+        </div>
+        """
     
     # Format data gaps
     data_gaps_html = ""
     if "data_gaps" in analysis_results and analysis_results["data_gaps"]:
+        data_gaps_html += "<ul class='list-group'>"
         for gap in analysis_results["data_gaps"]:
-            data_gaps_html += f'<div class="data-gap">{gap}</div>'
+            data_gaps_html += f"<li class='list-group-item'>{gap}</li>"
+        data_gaps_html += "</ul>"
     else:
-        data_gaps_html = "<p>No data gaps identified.</p>"
+        data_gaps_html = "<p>No significant data gaps identified.</p>"
     
-    # Format visualizations
+    # Format visualization cards
     visualization_cards_html = ""
     for viz in visualizations:
         viz_type = viz.get("type", "")
         filename = viz.get("filename", "")
         title = ""
+        description = ""  # Initialize description with a default empty string
         
         if viz_type == "distribution":
             metric = viz.get("metric", "")
@@ -1293,6 +1149,10 @@ def generate_interactive_dashboard(analysis_results, statistics, visualizations,
         elif viz_type == "wordcloud":
             title = "Agent Actions Word Cloud"
             description = "Common actions taken by agents"
+        else:
+            # For any unrecognized visualization type
+            title = viz.get("title", "Visualization")
+            description = viz.get("description", "Analysis visualization")
         
         # Get just the filename without the path
         img_filename = os.path.basename(filename)
