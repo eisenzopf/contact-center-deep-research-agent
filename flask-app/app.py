@@ -456,7 +456,7 @@ async def refine_analysis_results(analysis, statistics, api_key, debug=False):
             """
             
             try:
-                # Use _generate_content instead of generate_text
+                # Use _generate_content and handle text response
                 result = await generator._generate_content(prompt)
                 
                 # Extract the refined answer
@@ -515,21 +515,37 @@ async def validate_and_boost_confidence(analysis, statistics, api_key, debug=Fal
             
             Please:
             1. Verify if the answer is fully supported by the statistics
-            2. Rate the confidence level (Low, Medium, High) based on evidence strength
-            3. Return only the confidence rating as a number between 0 and 1
+            2. Rate the confidence level based on evidence strength
+            3. Return only a number between 0 and 1 representing the confidence level
             """
             
             try:
-                # Use _generate_content instead of generate_text
+                # Use _generate_content and handle text response
                 result = await generator._generate_content(prompt)
+                result_str = result if isinstance(result, str) else str(result)
                 
                 # Try to extract a confidence value
                 try:
-                    result_str = result if isinstance(result, str) else str(result)
-                    new_confidence = float(result_str.strip())
+                    # Look for a number in the response
+                    import re
+                    confidence_matches = re.findall(r'0\.\d+', result_str)
+                    if confidence_matches:
+                        new_confidence = float(confidence_matches[0])
+                    else:
+                        # If no decimal found, look for confidence keywords
+                        if "high" in result_str.lower():
+                            new_confidence = 0.8
+                        elif "medium" in result_str.lower():
+                            new_confidence = 0.5
+                        elif "low" in result_str.lower():
+                            new_confidence = 0.3
+                        else:
+                            # Default modest boost
+                            new_confidence = min(confidence + 0.1, 0.8)
+                    
                     # Ensure it's in the valid range
                     new_confidence = max(0.1, min(new_confidence, 0.95))
-                except ValueError:
+                except Exception:
                     # If we can't parse a float, use a modest boost
                     new_confidence = min(confidence + 0.1, 0.8)
                 
