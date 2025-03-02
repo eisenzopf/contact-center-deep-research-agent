@@ -244,13 +244,16 @@ async def compile_attribute_statistics(attribute_results, api_key, debug=False):
     
     return statistics
 
-async def review_attribute_details(attribute_results, api_key, debug=False):
+async def review_attribute_details(attribute_results, required_attributes, questions, api_key, debug=False):
     """Extract detailed insights from raw attribute values for deeper analysis."""
     analyzer = DataAnalyzer(api_key=api_key, debug=debug)
     
     # Collect all attribute values by type
     attribute_details = defaultdict(list)
     for result in attribute_results:
+        if "error" in result:
+            continue
+            
         for attr_value in result["attribute_values"]:
             if attr_value["confidence"] >= 0.6:
                 attribute_details[attr_value["field_name"]].append({
@@ -259,20 +262,32 @@ async def review_attribute_details(attribute_results, api_key, debug=False):
                     "confidence": attr_value["confidence"]
                 })
     
-    # Focus on key attributes that might contain valuable details
-    focus_attributes = [
-        "agent_actions", 
-        "resolution_offered", 
-        "fee_type",
-        "customer_sentiment"
-    ]
+    # Dynamically identify the most important attributes for our questions
+    print("Identifying key attributes for deeper analysis...")
+    focus_attributes = await analyzer.identify_key_attributes(
+        questions=questions,
+        available_attributes=required_attributes,
+        max_attributes=5  # Adjust as needed
+    )
+    
+    print(f"Selected {len(focus_attributes)} key attributes for detailed analysis:")
+    for attr_name in focus_attributes:
+        attr = next((a for a in required_attributes if a['field_name'] == attr_name), None)
+        if attr:
+            print(f"  - {attr['title']} ({attr_name})")
     
     insights = {}
     for attr_name in focus_attributes:
         if attr_name not in attribute_details:
+            print(f"  Warning: Key attribute '{attr_name}' has no values in the dataset")
             continue
             
         values = [item["value"] for item in attribute_details[attr_name]]
+        
+        if not values:
+            continue
+            
+        print(f"Analyzing patterns in '{attr_name}' ({len(values)} values)...")
         
         # Generate detailed insights for this attribute
         prompt = f"""
