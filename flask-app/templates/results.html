@@ -10,6 +10,26 @@
         body { padding-top: 20px; }
         .card { height: 100%; margin-bottom: 20px; }
         .accordion-button:not(.collapsed) { background-color: #e7f1ff; }
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.25em 0.6em;
+            font-size: 0.75em;
+            font-weight: 700;
+            border-radius: 0.25rem;
+            margin-left: 10px;
+        }
+        .confidence-low {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        .confidence-medium {
+            background-color: #6c757d;
+            color: #fff;
+        }
+        .confidence-high {
+            background-color: #198754;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -29,20 +49,20 @@
                         {% if analysis and analysis.answers %}
                             {% for answer in analysis.answers %}
                                 <div class="mb-4">
-                                    <h5>{{ answer.question }}</h5>
+                                    <h5>
+                                        {{ answer.question }}
+                                        {% if answer.confidence %}
+                                            {% set confidence = answer.confidence|float if answer.confidence is string else answer.confidence %}
+                                            {% if confidence < 0.4 %}
+                                                <span class="confidence-badge confidence-low">Low confidence</span>
+                                            {% elif confidence < 0.7 %}
+                                                <span class="confidence-badge confidence-medium">Medium confidence</span>
+                                            {% else %}
+                                                <span class="confidence-badge confidence-high">High confidence</span>
+                                            {% endif %}
+                                        {% endif %}
+                                    </h5>
                                     <p>{{ answer.answer }}</p>
-                                    
-                                    {% if answer.confidence %}
-                                    <div class="progress mb-2" style="height: 20px;">
-                                        {% set confidence = answer.confidence|float if answer.confidence is string else answer.confidence %}
-                                        <div class="progress-bar" role="progressbar" 
-                                             style="width: {{ confidence * 100 }}%;" 
-                                             aria-valuenow="{{ confidence * 100 }}" 
-                                             aria-valuemin="0" aria-valuemax="100">
-                                            {{ "%.0f"|format(confidence * 100) }}%
-                                        </div>
-                                    </div>
-                                    {% endif %}
                                     
                                     {% if answer.key_metrics %}
                                     <div class="mt-2">
