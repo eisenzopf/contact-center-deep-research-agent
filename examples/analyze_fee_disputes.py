@@ -119,22 +119,37 @@ async def get_required_attributes(api_key, debug=False):
     
     return result["attributes"]
 
-async def generate_attributes_for_conversations(conversations, attributes, api_key, debug=False, batch_size=5):
-    """Generate attribute values for multiple conversations in parallel batches."""
+async def generate_attributes_for_conversations(conversations, attributes, api_key, debug=False, batch_size=5, max_retries=3):
+    """Generate attribute values for multiple conversations in parallel batches with error handling."""
     generator = TextGenerator(api_key=api_key, debug=debug)
     
     async def process_conversation(conversation):
         print(f"Analyzing conversation: {conversation['id']}...")
         
-        attribute_values = await generator.generate_attributes(
-            text=conversation['text'],
-            attributes=attributes
-        )
-        
-        return {
-            "conversation_id": conversation['id'],
-            "attribute_values": attribute_values
-        }
+        for attempt in range(max_retries):
+            try:
+                attribute_values = await generator.generate_attributes(
+                    text=conversation['text'],
+                    attributes=attributes
+                )
+                
+                return {
+                    "conversation_id": conversation['id'],
+                    "attribute_values": attribute_values
+                }
+            except ValueError as e:
+                if "Failed to parse JSON response" in str(e) and attempt < max_retries - 1:
+                    print(f"  Retry {attempt+1}/{max_retries} due to JSON parsing error...")
+                    await asyncio.sleep(1)  # Brief pause before retry
+                else:
+                    if debug:
+                        print(f"  Error processing conversation {conversation['id']}: {e}")
+                    # Return partial results with error information
+                    return {
+                        "conversation_id": conversation['id'],
+                        "attribute_values": [],
+                        "error": str(e)
+                    }
     
     # Use the process_in_batches method from BaseAnalyzer
     results = await generator.process_in_batches(
@@ -143,6 +158,17 @@ async def generate_attributes_for_conversations(conversations, attributes, api_k
         process_func=process_conversation
     )
     
+    # Count successful and failed conversations
+    success_count = sum(1 for r in results if "error" not in r)
+    error_count = len(results) - success_count
+    
+    if error_count > 0:
+        print(f"\nProcessed {len(results)} conversations: {success_count} successful, {error_count} with errors")
+        if debug:
+            for result in results:
+                if "error" in result:
+                    print(f"  Conversation {result['conversation_id']} failed: {result['error'][:100]}...")
+    
     return results
 
 async def compile_attribute_statistics(attribute_results, api_key, debug=False):
@@ -150,8 +176,18 @@ async def compile_attribute_statistics(attribute_results, api_key, debug=False):
     # Create a structure to hold all values for each attribute
     attribute_values = defaultdict(list)
     
-    # Collect all values for each attribute
+    # Count successful and failed conversations
+    error_count = sum(1 for r in attribute_results if "error" in r)
+    success_count = len(attribute_results) - error_count
+    
+    if error_count > 0 and debug:
+        print(f"Note: {error_count} conversations had errors and will be excluded from statistics")
+    
+    # Collect all values for each attribute (skip conversations with errors)
     for result in attribute_results:
+        if "error" in result:
+            continue
+            
         for attr_value in result["attribute_values"]:
             field_name = attr_value["field_name"]
             value = attr_value["value"]
@@ -208,7 +244,67 @@ async def compile_attribute_statistics(attribute_results, api_key, debug=False):
     
     return statistics
 
-async def analyze_attribute_findings(statistics, questions, api_key, debug=False):
+async def review_attribute_details(attribute_results, api_key, debug=False):
+    """Extract detailed insights from raw attribute values for deeper analysis."""
+    analyzer = DataAnalyzer(api_key=api_key, debug=debug)
+    
+    # Collect all attribute values by type
+    attribute_details = defaultdict(list)
+    for result in attribute_results:
+        for attr_value in result["attribute_values"]:
+            if attr_value["confidence"] >= 0.6:
+                attribute_details[attr_value["field_name"]].append({
+                    "conversation_id": result["conversation_id"],
+                    "value": attr_value["value"],
+                    "confidence": attr_value["confidence"]
+                })
+    
+    # Focus on key attributes that might contain valuable details
+    focus_attributes = [
+        "agent_actions", 
+        "resolution_offered", 
+        "fee_type",
+        "customer_sentiment"
+    ]
+    
+    insights = {}
+    for attr_name in focus_attributes:
+        if attr_name not in attribute_details:
+            continue
+            
+        values = [item["value"] for item in attribute_details[attr_name]]
+        
+        # Generate detailed insights for this attribute
+        prompt = f"""
+        Analyze these {len(values)} values for the '{attr_name}' attribute from fee dispute conversations.
+        
+        Values:
+        {json.dumps(values[:100], indent=2)}
+        
+        Extract 3-5 key patterns or insights that aren't captured by simple frequency counting.
+        For example:
+        - Common combinations of actions
+        - Typical sequences or patterns
+        - Contextual details that might be missed
+        - Qualitative aspects that frequency analysis doesn't show
+        
+        Format your response as a JSON list of insights, each with a title and description.
+        """
+        
+        try:
+            result = await analyzer._generate_content(
+                prompt,
+                expected_format=[{"title": str, "description": str}]
+            )
+            insights[attr_name] = result
+        except Exception as e:
+            if debug:
+                print(f"Error analyzing {attr_name}: {e}")
+            insights[attr_name] = []
+    
+    return insights
+
+async def analyze_attribute_findings(statistics, questions, api_key, debug=False, detailed_insights=None):
     """Analyze the compiled attribute statistics to answer research questions."""
     analyzer = DataAnalyzer(api_key=api_key, debug=debug)
     
@@ -217,6 +313,10 @@ async def analyze_attribute_findings(statistics, questions, api_key, debug=False
         "attribute_statistics": statistics,
         "sample_size": sum(stats["total_values"] for stats in statistics.values()) // len(statistics) if statistics else 0
     }
+    
+    # Add detailed insights if available
+    if detailed_insights:
+        formatted_data["detailed_insights"] = detailed_insights
     
     # Analyze the findings
     analysis = await analyzer.analyze_findings(
@@ -237,6 +337,9 @@ async def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--batch-size', type=int, default=5, 
                         help='Number of conversations to process in parallel (default: 5)')
+    parser.add_argument('--save-attributes', help='Optional path to save raw attribute values as JSON')
+    parser.add_argument('--max-retries', type=int, default=3, 
+                        help='Maximum number of retries for failed API calls (default: 3)')
     
     args = parser.parse_args()
     
@@ -299,7 +402,8 @@ async def main():
         required_attributes,
         api_key,
         args.debug,
-        batch_size=5  # Process 5 conversations at a time
+        batch_size=args.batch_size,
+        max_retries=args.max_retries
     )
     
     # Step 5: Compile statistics on attribute values
@@ -372,6 +476,12 @@ async def main():
         with open(args.output, 'w') as f:
             json.dump(output_results, f, indent=2)
         print(f"\nResults saved to {args.output}")
+    
+    # Save raw attribute values if requested
+    if args.save_attributes:
+        with open(args.save_attributes, 'w') as f:
+            json.dump(attribute_results, f, indent=2)
+        print(f"Raw attribute values saved to {args.save_attributes}")
     
     # Print timing information
     elapsed_time = time.time() - start_time
