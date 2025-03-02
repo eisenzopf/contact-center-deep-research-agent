@@ -34,11 +34,12 @@
                                     
                                     {% if answer.confidence %}
                                     <div class="progress mb-2" style="height: 20px;">
+                                        {% set confidence = answer.confidence|float if answer.confidence is string else answer.confidence %}
                                         <div class="progress-bar" role="progressbar" 
-                                             style="width: {{ answer.confidence * 100 }}%;" 
-                                             aria-valuenow="{{ answer.confidence * 100 }}" 
+                                             style="width: {{ confidence * 100 }}%;" 
+                                             aria-valuenow="{{ confidence * 100 }}" 
                                              aria-valuemin="0" aria-valuemax="100">
-                                            {{ "%.0f"|format(answer.confidence * 100) }}%
+                                            {{ "%.0f"|format(confidence * 100) }}%
                                         </div>
                                     </div>
                                     {% endif %}
@@ -105,7 +106,7 @@
                                     <tr>
                                         <td>{{ value }}</td>
                                         <td>{{ count }}</td>
-                                        <td>{{ "%.1f"|format(stats.percentages[value]) }}%</td>
+                                        <td>{{ "%.1f"|format(stats.percentages[value]|float) }}%</td>
                                     </tr>
                                     {% endfor %}
                                 {% else %}
