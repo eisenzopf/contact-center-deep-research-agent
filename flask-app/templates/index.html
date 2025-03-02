@@ -1,0 +1,224 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Researcher for Contact Centers</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 30px;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .main-card {
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            overflow: hidden;
+        }
+        .card-header {
+            background-color: #4a6fdc;
+            color: white;
+            padding: 20px;
+            border-bottom: none;
+        }
+        .card-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+        }
+        .card-body {
+            padding: 25px;
+        }
+        #questions-textarea {
+            min-height: 150px;
+            font-family: inherit;
+            border-radius: 8px;
+            border: 1px solid #ced4da;
+            padding: 12px;
+            resize: vertical;
+        }
+        #progress-container {
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: 'Consolas', monospace;
+            border: 1px solid #e9ecef;
+        }
+        .btn-primary {
+            background-color: #4a6fdc;
+            border-color: #4a6fdc;
+            padding: 10px 20px;
+            font-weight: 500;
+            border-radius: 6px;
+        }
+        .btn-primary:hover {
+            background-color: #3a5cbe;
+            border-color: #3a5cbe;
+        }
+        .form-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        .form-text {
+            color: #6c757d;
+            font-style: italic;
+        }
+        .progress {
+            height: 10px;
+            border-radius: 5px;
+        }
+        .progress-bar {
+            background-color: #4a6fdc;
+        }
+        .chat-message {
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            max-width: 85%;
+        }
+        .system-message {
+            background-color: #e9ecef;
+            align-self: flex-start;
+        }
+        .user-message {
+            background-color: #4a6fdc;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-card">
+            <div class="card-header">
+                <h1><i class="fas fa-robot me-2"></i> Deep Researcher for Contact Centers</h1>
+            </div>
+            <div class="card-body">
+                <form id="analysis-form">
+                    <div class="mb-3">
+                        <label class="form-label">What would you like to research?</label>
+                        <textarea id="questions-textarea" class="form-control" required
+                                  placeholder="Enter your research questions, one per line. For example:
+What are the most common reasons for fee disputes?
+How do fee disputes typically get resolved?
+What percentage of fee disputes result in refunds?"></textarea>
+                        <div class="form-text mt-2">Enter each question on a new line. Be specific for better results.</div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" id="start-button">
+                            <i class="fas fa-search me-2"></i>Start Research
+                        </button>
+                    </div>
+                </form>
+                
+                <div id="analysis-progress" style="display: none; margin-top: 25px;">
+                    <h5 class="mb-3"><i class="fas fa-spinner fa-spin me-2"></i>Research in Progress</h5>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
+                             style="width: 100%"></div>
+                    </div>
+                    <div class="chat-container">
+                        <div class="chat-message system-message">
+                            <strong>System:</strong> Starting research...
+                        </div>
+                    </div>
+                    <div id="progress-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const socket = io();
+            const progressContainer = document.getElementById('progress-container');
+            const analysisForm = document.getElementById('analysis-form');
+            const startButton = document.getElementById('start-button');
+            const analysisProgress = document.getElementById('analysis-progress');
+            const questionsTextarea = document.getElementById('questions-textarea');
+            const chatContainer = document.querySelector('.chat-container');
+            
+            // Form submit handler
+            analysisForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Get questions from textarea
+                const questionsText = questionsTextarea.value.trim();
+                
+                if (!questionsText) {
+                    alert('Please enter at least one research question');
+                    return;
+                }
+                
+                // Disable form and show progress
+                startButton.disabled = true;
+                analysisProgress.style.display = 'block';
+                
+                // Add user message to chat
+                const userQuestions = questionsText.split('\n').filter(q => q.trim() !== '');
+                const userMessage = document.createElement('div');
+                userMessage.className = 'chat-message user-message';
+                userMessage.innerHTML = '<strong>Your questions:</strong><br>' + 
+                                       userQuestions.map(q => q).join('<br>');
+                chatContainer.appendChild(userMessage);
+                
+                // Start analysis
+                socket.emit('start_analysis', {
+                    questions: questionsText
+                });
+            });
+            
+            // Socket event handlers
+            socket.on('progress', function(data) {
+                const systemMessage = document.createElement('div');
+                systemMessage.className = 'chat-message system-message';
+                systemMessage.textContent = data.message;
+                chatContainer.appendChild(systemMessage);
+                
+                // Auto scroll to bottom
+                systemMessage.scrollIntoView({ behavior: 'smooth' });
+            });
+            
+            socket.on('analysis_complete', function(data) {
+                const systemMessage = document.createElement('div');
+                systemMessage.className = 'chat-message system-message';
+                systemMessage.innerHTML = '<strong>Research complete!</strong> Redirecting to results...';
+                chatContainer.appendChild(systemMessage);
+                
+                setTimeout(() => {
+                    window.location.href = '/results/' + data.analysis_id;
+                }, 2000);
+            });
+            
+            socket.on('error', function(data) {
+                const systemMessage = document.createElement('div');
+                systemMessage.className = 'chat-message system-message';
+                systemMessage.innerHTML = '<strong>ERROR:</strong> ' + data.message;
+                chatContainer.appendChild(systemMessage);
+                
+                startButton.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>
