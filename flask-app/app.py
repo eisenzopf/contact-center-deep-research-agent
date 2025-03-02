@@ -31,7 +31,9 @@ try:
         review_attribute_details,
         analyze_attribute_findings,
         analyze_attribute_relationships,
-        resolve_data_gaps_dynamically
+        resolve_data_gaps_dynamically,
+        refine_analysis_results,
+        validate_and_boost_confidence
     )
     logger.info("Successfully imported functions from analyze_fee_disputes.py")
 except ImportError as e:
@@ -296,6 +298,24 @@ async def run_analysis(analysis_id, questions, db_path, sample_size, batch_size)
             api_key=api_key,
             debug=False,
             detailed_insights=detailed_insights
+        )
+        
+        # Add this after the initial analysis but before finalizing
+        emit_progress("Refining analysis results for higher confidence...")
+        analysis = await refine_analysis_results(
+            analysis,
+            statistics,
+            api_key,
+            False
+        )
+        
+        # Add this before storing results
+        emit_progress("Boosting confidence through additional validation...")
+        enhanced_analysis = await validate_and_boost_confidence(
+            enhanced_analysis,
+            enhanced_statistics,
+            api_key,
+            False
         )
         
         # Store results in cache
