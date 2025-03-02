@@ -82,25 +82,12 @@
         .progress-bar {
             background-color: #4a6fdc;
         }
-        .chat-message {
-            padding: 12px 15px;
-            margin-bottom: 10px;
-            border-radius: 8px;
-            max-width: 85%;
-        }
-        .system-message {
+        .user-questions {
             background-color: #e9ecef;
-            align-self: flex-start;
-        }
-        .user-message {
-            background-color: #4a6fdc;
-            color: white;
-            align-self: flex-end;
-            margin-left: auto;
-        }
-        .chat-container {
-            display: flex;
-            flex-direction: column;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            font-size: 0.9rem;
         }
     </style>
 </head>
@@ -130,17 +117,20 @@ What percentage of fee disputes result in refunds?"></textarea>
                 </form>
                 
                 <div id="analysis-progress" style="display: none; margin-top: 25px;">
-                    <h5 class="mb-3"><i class="fas fa-spinner fa-spin me-2"></i>Research in Progress</h5>
+                    <div id="user-questions" class="user-questions" style="display: none;">
+                        <strong>Your questions:</strong>
+                        <div id="questions-list"></div>
+                    </div>
+                    
+                    <h5 class="mb-3">
+                        <i class="fas fa-spinner fa-spin me-2"></i>
+                        <span id="current-step">Research in Progress</span>
+                    </h5>
+                    
                     <div class="progress mb-3">
                         <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
                              style="width: 100%"></div>
                     </div>
-                    <div class="chat-container">
-                        <div class="chat-message system-message">
-                            <strong>System:</strong> Starting research...
-                        </div>
-                    </div>
-                    <div id="progress-container"></div>
                 </div>
             </div>
         </div>
@@ -151,12 +141,13 @@ What percentage of fee disputes result in refunds?"></textarea>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const socket = io();
-            const progressContainer = document.getElementById('progress-container');
             const analysisForm = document.getElementById('analysis-form');
             const startButton = document.getElementById('start-button');
             const analysisProgress = document.getElementById('analysis-progress');
             const questionsTextarea = document.getElementById('questions-textarea');
-            const chatContainer = document.querySelector('.chat-container');
+            const currentStep = document.getElementById('current-step');
+            const userQuestions = document.getElementById('user-questions');
+            const questionsList = document.getElementById('questions-list');
             
             // Form submit handler
             analysisForm.addEventListener('submit', function(e) {
@@ -174,13 +165,10 @@ What percentage of fee disputes result in refunds?"></textarea>
                 startButton.disabled = true;
                 analysisProgress.style.display = 'block';
                 
-                // Add user message to chat
-                const userQuestions = questionsText.split('\n').filter(q => q.trim() !== '');
-                const userMessage = document.createElement('div');
-                userMessage.className = 'chat-message user-message';
-                userMessage.innerHTML = '<strong>Your questions:</strong><br>' + 
-                                       userQuestions.map(q => q).join('<br>');
-                chatContainer.appendChild(userMessage);
+                // Display user questions
+                const userQuestionsArray = questionsText.split('\n').filter(q => q.trim() !== '');
+                questionsList.innerHTML = userQuestionsArray.map(q => `<div>${q}</div>`).join('');
+                userQuestions.style.display = 'block';
                 
                 // Start analysis
                 socket.emit('start_analysis', {
@@ -190,20 +178,21 @@ What percentage of fee disputes result in refunds?"></textarea>
             
             // Socket event handlers
             socket.on('progress', function(data) {
-                const systemMessage = document.createElement('div');
-                systemMessage.className = 'chat-message system-message';
-                systemMessage.textContent = data.message;
-                chatContainer.appendChild(systemMessage);
-                
-                // Auto scroll to bottom
-                systemMessage.scrollIntoView({ behavior: 'smooth' });
+                // Update the current step text
+                if (data.message.startsWith('Step')) {
+                    // Extract just the description part after the step number
+                    const stepText = data.message.split(':')[1].trim();
+                    currentStep.textContent = stepText;
+                } else if (data.message.startsWith('Analysis completed')) {
+                    currentStep.textContent = 'Analysis completed!';
+                } else if (!data.message.startsWith('Required attributes') && 
+                           !data.message.startsWith('Found')) {
+                    currentStep.textContent = data.message;
+                }
             });
             
             socket.on('analysis_complete', function(data) {
-                const systemMessage = document.createElement('div');
-                systemMessage.className = 'chat-message system-message';
-                systemMessage.innerHTML = '<strong>Research complete!</strong> Redirecting to results...';
-                chatContainer.appendChild(systemMessage);
+                currentStep.textContent = 'Research complete! Redirecting to results...';
                 
                 setTimeout(() => {
                     window.location.href = '/results/' + data.analysis_id;
@@ -211,10 +200,8 @@ What percentage of fee disputes result in refunds?"></textarea>
             });
             
             socket.on('error', function(data) {
-                const systemMessage = document.createElement('div');
-                systemMessage.className = 'chat-message system-message';
-                systemMessage.innerHTML = '<strong>ERROR:</strong> ' + data.message;
-                chatContainer.appendChild(systemMessage);
+                currentStep.textContent = 'Error: ' + data.message;
+                currentStep.style.color = 'red';
                 
                 startButton.disabled = false;
             });
