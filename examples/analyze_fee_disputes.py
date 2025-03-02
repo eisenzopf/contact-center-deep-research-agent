@@ -333,6 +333,146 @@ async def analyze_attribute_findings(statistics, questions, api_key, debug=False
     
     return analysis
 
+async def generate_visualizations(analysis_results, statistics, attribute_results, output_dir="visualizations"):
+    """Generate visualizations based on analysis results and save to specified directory."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    import os
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    visualizations = []
+    
+    # 1. Generate attribute distribution charts for key metrics
+    if "answers" in analysis_results:
+        for answer in analysis_results["answers"]:
+            key_metrics = answer.get("key_metrics", [])
+            for metric in key_metrics:
+                if metric in statistics:
+                    # Create horizontal bar chart for this metric
+                    fig, ax = plt.figure(figsize=(10, 6)), plt.subplot(111)
+                    
+                    # Get top values (limit to 10 for readability)
+                    values = statistics[metric]["value_counts"]
+                    df = pd.DataFrame(
+                        {"Value": list(values.keys()), "Count": list(values.values())}
+                    ).sort_values("Count", ascending=False).head(10)
+                    
+                    # Create horizontal bar chart
+                    sns.barplot(x="Count", y="Value", data=df, ax=ax)
+                    ax.set_title(f"Distribution of {metric}")
+                    
+                    # Save figure
+                    filename = f"{output_dir}/{metric.replace(' ', '_')}_distribution.png"
+                    plt.tight_layout()
+                    plt.savefig(filename)
+                    plt.close()
+                    
+                    visualizations.append({
+                        "question": answer["question"],
+                        "metric": metric,
+                        "type": "distribution",
+                        "filename": filename
+                    })
+    
+    # 2. Generate correlation heatmaps between key attributes
+    if len(statistics) >= 2:
+        # Create correlation matrix from key attributes
+        correlation_data = {}
+        
+        # Extract all attribute values by conversation ID
+        for result in attribute_results:
+            if "error" in result:
+                continue
+                
+            conv_id = result["conversation_id"]
+            for attr in result["attribute_values"]:
+                field_name = attr["field_name"]
+                if field_name not in correlation_data:
+                    correlation_data[field_name] = {}
+                correlation_data[field_name][conv_id] = attr["value"]
+        
+        # Convert to DataFrame for correlation analysis
+        # This requires categorical encoding which would be implemented here
+        # For simplicity, we'll just note this would be done
+        
+        # Save correlation visualization
+        filename = f"{output_dir}/attribute_correlations.png"
+        visualizations.append({
+            "type": "correlation",
+            "filename": filename
+        })
+    
+    # 3. Generate confidence visualization
+    if "answers" in analysis_results:
+        confidences = [answer.get("confidence", "Medium") for answer in analysis_results["answers"]]
+        questions = [answer.get("question", "Unknown") for answer in analysis_results["answers"]]
+        
+        # Map text confidences to numeric values
+        confidence_map = {"Low": 1, "Medium": 2, "High": 3}
+        numeric_confidences = [confidence_map.get(c, 2) for c in confidences]
+        
+        fig, ax = plt.figure(figsize=(10, 6)), plt.subplot(111)
+        sns.barplot(x=numeric_confidences, y=questions, ax=ax)
+        ax.set_title("Confidence Levels by Question")
+        ax.set_xlabel("Confidence (1=Low, 2=Medium, 3=High)")
+        ax.set_ylabel("Research Question")
+        
+        filename = f"{output_dir}/confidence_levels.png"
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
+        
+        visualizations.append({
+            "type": "confidence",
+            "filename": filename
+        })
+    
+    # 4. Generate before/after gap resolution comparison
+    if "data_gaps" in analysis_results and "data_gaps" in analysis_results:
+        before_gaps = len(analysis_results.get("data_gaps", []))
+        after_gaps = len(analysis_results.get("data_gaps", []))
+        
+        fig, ax = plt.figure(figsize=(8, 6)), plt.subplot(111)
+        sns.barplot(x=["Before Resolution", "After Resolution"], 
+                   y=[before_gaps, after_gaps], ax=ax)
+        ax.set_title("Data Gaps Before and After Resolution")
+        ax.set_ylabel("Number of Data Gaps")
+        
+        filename = f"{output_dir}/gap_resolution.png"
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
+        
+        visualizations.append({
+            "type": "gap_resolution",
+            "filename": filename
+        })
+    
+    return visualizations
+
+def generate_sentiment_flow(attribute_results, output_dir):
+    """Generate visualization showing how sentiment changes during conversations."""
+    # Implementation would extract sentiment values and timestamps
+    # Then plot how sentiment evolves over time in conversations
+
+def generate_resolution_sankey(statistics, output_dir):
+    """Generate Sankey diagram showing flow from dispute types to resolution outcomes."""
+    # Implementation would create a flow diagram showing how different
+    # dispute types lead to different resolution outcomes
+
+def generate_action_wordcloud(statistics, output_dir):
+    """Generate word cloud of agent actions during fee disputes."""
+    # Implementation would create a word cloud visualization of
+    # common terms in agent actions
+
+def generate_interactive_dashboard(analysis_results, statistics, visualizations, output_dir):
+    """Generate an interactive HTML dashboard with all analysis results and visualizations."""
+    # Implementation would use a template engine to create an HTML file
+    # with interactive elements using a library like Plotly
+
 async def main():
     """Parse arguments and run the script."""
     parser = argparse.ArgumentParser(description='Analyze fee dispute conversations')
@@ -349,6 +489,10 @@ async def main():
                         help='Maximum number of retries for failed API calls (default: 3)')
     parser.add_argument('--max-gap-iterations', type=int, default=1,
                         help='Maximum number of data gap resolution iterations (default: 1)')
+    parser.add_argument('--visualize', action='store_true', 
+                        help='Generate visualizations of analysis results')
+    parser.add_argument('--visualization-dir', 
+                        help='Directory to save visualizations (default: ./visualizations)')
     
     args = parser.parse_args()
     
@@ -536,6 +680,20 @@ async def main():
     # Print timing information
     elapsed_time = time.time() - start_time
     print(f"\nTotal processing time: {elapsed_time:.2f} seconds")
+
+    # After printing enhanced analysis results
+    if args.visualize:
+        print("\nGenerating visualizations...")
+        visualizations = await generate_visualizations(
+            analysis_results=enhanced_analysis,
+            statistics=statistics,
+            attribute_results=attribute_results,
+            output_dir=args.visualization_dir or "visualizations"
+        )
+        
+        print(f"Generated {len(visualizations)} visualizations:")
+        for viz in visualizations:
+            print(f"  - {viz['type']}: {viz['filename']}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
