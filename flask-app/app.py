@@ -11,6 +11,7 @@ from flask_socketio import SocketIO, emit
 from threading import Thread
 from contact_center_analysis.analyze import DataAnalyzer
 from contact_center_analysis.text import TextGenerator
+from logging.handlers import RotatingFileHandler
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -567,26 +568,56 @@ async def validate_and_boost_confidence(analysis, statistics, api_key, debug=Fal
     
     return validated_analysis
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run the Flask app for fee dispute analysis')
-    parser.add_argument('--db_path', type=str, help='Path to the SQLite database')
-    parser.add_argument('--sample_size', type=int, default=100, help='Sample size for analysis')
-    parser.add_argument('--batch_size', type=int, default=10, help='Batch size for processing')
+# Add command line argument parsing
+def parse_args():
+    parser = argparse.ArgumentParser(description='Fee Dispute Analysis Web App')
     parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
+    parser.add_argument('--db_path', type=str, help='Path to the SQLite database')
+    parser.add_argument('--sample_size', type=int, default=100, help='Number of conversations to sample')
+    parser.add_argument('--batch_size', type=int, default=10, help='Batch size for processing conversations')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode with detailed logging')
+    parser.add_argument('--log_file', type=str, default='fee_analysis_debug.log', help='Path to the debug log file')
+    return parser.parse_args()
+
+# Setup logging based on debug flag
+def setup_logging(debug_mode, log_file):
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     
-    args = parser.parse_args()
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
     
-    if args.db_path:
-        db_path = args.db_path
+    # File handler for debug logs
+    if debug_mode:
+        file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+        file_handler.setLevel(logging.DEBUG)
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]')
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+        
+        # Set debug level for specific modules
+        logging.getLogger('contact_center_analysis').setLevel(logging.DEBUG)
+        
+        logger.info(f"Debug mode enabled. Detailed logs will be written to {log_file}")
+
+if __name__ == "__main__":
+    args = parse_args()
+    
+    # Set global variables from command line args
+    db_path = args.db_path
+    sample_size = args.sample_size
+    batch_size = args.batch_size
+    
+    # Setup logging based on debug flag
+    setup_logging(args.debug, args.log_file)
+    
+    if db_path:
         logger.info(f"Using database: {db_path}")
-    if args.sample_size:
-        sample_size = args.sample_size
-    if args.batch_size:
-        batch_size = args.batch_size
-    
-    # Create necessary directories
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(os.path.join(app.config['STATIC_FOLDER'], 'visualizations'), exist_ok=True)
     
     logger.info(f"Starting Flask app on port {args.port}")
-    socketio.run(app, debug=True, port=args.port)
+    socketio.run(app, host='0.0.0.0', port=args.port, debug=True)
