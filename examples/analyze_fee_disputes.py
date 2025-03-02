@@ -100,17 +100,9 @@ async def fetch_conversations_by_intents(db_path, matching_intents, limit=50):
     conn.close()
     return conversations
 
-async def get_required_attributes(api_key, debug=False):
+async def get_required_attributes(questions, api_key, debug=False):
     """Get the list of required attributes needed to answer fee dispute-related questions."""
     generator = TextGenerator(api_key=api_key, debug=debug)
-    
-    questions = [
-        "What are the most common types of fee disputes customers call about?",
-        "How often do agents offer refunds or credits to resolve fee disputes?",
-        "What percentage of fee disputes are resolved in the customer's favor?",
-        "What explanations do agents provide for disputed fees?",
-        "How do agents de-escalate conversations when customers are upset about fees?"
-    ]
     
     print("Generating required attributes for fee dispute analysis...")
     result = await generator.generate_required_attributes(
@@ -355,6 +347,8 @@ async def main():
     parser.add_argument('--save-attributes', help='Optional path to save raw attribute values as JSON')
     parser.add_argument('--max-retries', type=int, default=3, 
                         help='Maximum number of retries for failed API calls (default: 3)')
+    parser.add_argument('--max-gap-iterations', type=int, default=1,
+                        help='Maximum number of data gap resolution iterations (default: 1)')
     
     args = parser.parse_args()
     
@@ -366,8 +360,17 @@ async def main():
     
     start_time = time.time()
     
+    # Define research questions at the beginning
+    questions = [
+        "What are the most common types of fee disputes customers call about?",
+        "How often do agents offer refunds or credits to resolve fee disputes?",
+        "What percentage of fee disputes are resolved in the customer's favor?",
+        "What explanations do agents provide for disputed fees?",
+        "How do agents de-escalate conversations when customers are upset about fees?"
+    ]
+    
     # Step 1: Get required attributes
-    required_attributes = await get_required_attributes(api_key, args.debug)
+    required_attributes = await get_required_attributes(questions, api_key, args.debug)
     
     # Deduplicate required attributes by field_name
     unique_attributes = {}
@@ -446,23 +449,26 @@ async def main():
             percentage = stats['percentages'][value]
             print(f"    - {value}: {count} ({percentage:.1f}%)")
     
+    # After Step 5 (compile statistics) and before Step 6 (analyze findings)
+    print("\nExtracting detailed insights from attribute values...")
+    detailed_insights = await review_attribute_details(
+        attribute_results,
+        required_attributes,
+        questions,  # Now questions is defined
+        api_key,
+        args.debug
+    )
+
     # Step 6: Analyze the findings to answer research questions
     print("\nAnalyzing findings to answer research questions...")
-    questions = [
-        "What are the most common types of fee disputes customers call about?",
-        "How often do agents offer refunds or credits to resolve fee disputes?",
-        "What percentage of fee disputes are resolved in the customer's favor?",
-        "What explanations do agents provide for disputed fees?",
-        "How do agents de-escalate conversations when customers are upset about fees?"
-    ]
-    
     analysis = await analyze_attribute_findings(
         statistics,
         questions,
         api_key,
-        args.debug
+        args.debug,
+        detailed_insights  # Pass the detailed insights
     )
-    
+
     # Print analysis results
     print("\n=== Analysis Results ===")
     if "answers" in analysis:
@@ -472,10 +478,39 @@ async def main():
             print(f"Key Metrics: {', '.join(answer['key_metrics'])}")
             print(f"Confidence: {answer['confidence']}")
             print(f"Supporting Data: {answer['supporting_data']}")
-    
+
     if "data_gaps" in analysis and analysis["data_gaps"]:
         print("\nData Gaps Identified:")
         for gap in analysis["data_gaps"]:
+            print(f"  - {gap}")
+
+    # After the initial analysis
+    print("\nChecking for data gaps and enhancing analysis...")
+    # Create the analyzer instance
+    analyzer = DataAnalyzer(api_key=api_key, debug=args.debug)
+    enhanced_analysis = await analyzer.resolve_data_gaps(
+        analysis_results=analysis,
+        attribute_results=attribute_results,
+        statistics=statistics,
+        questions=questions,
+        detailed_insights=detailed_insights,
+        max_iterations=args.max_gap_iterations
+    )
+
+    # Print enhanced analysis results
+    print("\n=== Enhanced Analysis Results ===")
+    if "answers" in enhanced_analysis:
+        for answer in enhanced_analysis["answers"]:
+            print(f"\nQuestion: {answer['question']}")
+            print(f"Answer: {answer['answer']}")
+            print(f"Key Metrics: {', '.join(answer['key_metrics'])}")
+            print(f"Confidence: {answer['confidence']}")
+            print(f"Supporting Data: {answer['supporting_data']}")
+
+    # Print any remaining data gaps
+    if "data_gaps" in enhanced_analysis and enhanced_analysis["data_gaps"]:
+        print("\nRemaining Data Gaps:")
+        for gap in enhanced_analysis["data_gaps"]:
             print(f"  - {gap}")
     
     # Save results to file if requested
