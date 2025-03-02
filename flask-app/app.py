@@ -456,11 +456,12 @@ async def refine_analysis_results(analysis, statistics, api_key, debug=False):
             """
             
             try:
-                result = await generator.generate_text(prompt)
+                # Use _generate_content instead of generate_text
+                result = await generator._generate_content(prompt)
                 
                 # Extract the refined answer
                 refined_answer = dict(answer)
-                refined_answer["answer"] = result.strip()
+                refined_answer["answer"] = result if isinstance(result, str) else str(result)
                 refined_answer["confidence"] = min(confidence + 0.2, 0.9)  # Boost confidence but cap at 0.9
                 refined_answer["refinement_applied"] = True
                 
@@ -519,11 +520,13 @@ async def validate_and_boost_confidence(analysis, statistics, api_key, debug=Fal
             """
             
             try:
-                result = await generator.generate_text(prompt)
+                # Use _generate_content instead of generate_text
+                result = await generator._generate_content(prompt)
                 
                 # Try to extract a confidence value
                 try:
-                    new_confidence = float(result.strip())
+                    result_str = result if isinstance(result, str) else str(result)
+                    new_confidence = float(result_str.strip())
                     # Ensure it's in the valid range
                     new_confidence = max(0.1, min(new_confidence, 0.95))
                 except ValueError:
