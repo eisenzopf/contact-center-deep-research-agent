@@ -1,0 +1,156 @@
+# Deep Researcher for Contact Centers: Technical Architecture
+
+## System Architecture Overview
+
+The Deep Researcher for Contact Centers is built as a Flask web application that leverages a custom Python library called `contact_center_analysis` to process and analyze customer service conversations. The system follows a modular architecture with clear separation between the web interface, analysis pipeline, and core AI capabilities.
+
+## Core Components
+
+### 1. Web Application Layer (`flask-app/`)
+
+- **Flask Framework**: Handles HTTP requests, renders templates, and manages user sessions
+- **SocketIO**: Provides real-time progress updates during analysis
+- **Asynchronous Processing**: Long-running analyses run in background threads with proper event loop management
+
+### 2. Analysis Pipeline (`examples/analyze_fee_disputes.py`)
+
+This module implements a 12-step analysis pipeline that orchestrates the entire process:
+
+1. **Question Analysis**: `get_required_attributes()` - Determines what data attributes are needed to answer research questions by prompting an LLM to generate a structured list of attributes with field names, titles, and descriptions.
+
+2. **Intent Matching**: `find_matching_intents()` - Uses semantic matching to identify conversation intents related to fee disputes from the database.
+
+3. **Conversation Sampling**: `fetch_conversations_by_intents()` - Retrieves a representative sample of conversations with matching intents from the SQLite database.
+
+4. **Attribute Extraction**: `generate_attributes_for_conversations()` - Processes each conversation to extract structured attribute values using LLM-based extraction with parallel processing and error handling.
+
+5. **Statistical Compilation**: `compile_attribute_statistics()` - Aggregates attribute values across all conversations, handling confidence thresholds and data normalization.
+
+6. **Semantic Consolidation**: `improve_attribute_consolidation()` - Groups semantically similar values to create meaningful categories using the Categorizer module.
+
+7. **Enhanced Statistics**: Recompiles statistics after consolidation for more accurate analysis.
+
+8. **Detailed Insight Extraction**: `review_attribute_details()` - Identifies the most important attributes for the research questions and extracts deeper patterns beyond simple frequency counts.
+
+9. **Question Answering**: `analyze_attribute_findings()` - Generates direct answers to research questions based on the compiled statistics and detailed insights.
+
+10. **Relationship Analysis**: `analyze_attribute_relationships()` - Examines correlations and connections between different attributes.
+
+11. **Gap Resolution**: `resolve_data_gaps_dynamically()` - Identifies and addresses data gaps through inference and enhancement.
+
+12. **Final Analysis**: Recompiles statistics and regenerates analysis with the enhanced data.
+
+### 3. Core Library (`contact_center_analysis/`)
+
+The library is organized into specialized modules:
+
+- **BaseAnalyzer**: Base class with shared functionality for all analyzer classes
+- **TextGenerator**: Handles attribute extraction and text generation tasks
+- **AttributeMatcher**: Performs semantic matching between attributes
+- **Categorizer**: Implements semantic grouping and label consolidation
+- **DataAnalyzer**: Provides advanced data analysis capabilities
+
+## Key Technical Features
+
+### 1. Asynchronous Processing
+
+The application uses Python's `asyncio` library extensively:
+- All analysis functions are implemented as coroutines (`async def`)
+- Batch processing with controlled concurrency to prevent API rate limiting
+- Proper error handling and retry mechanisms for API calls
+
+### 2. Semantic Categorization
+
+The `Categorizer` class implements sophisticated semantic grouping:
+- Consolidates similar values (e.g., "late fee" and "late payment fee")
+- Uses LLM to create normalized mappings between raw and canonical values
+- Applies frequency-weighted consolidation to prioritize common patterns
+
+### 3. Attribute Extraction
+
+The attribute extraction process:
+- Defines structured attribute schemas with field names, titles, and descriptions
+- Uses LLM to extract values with confidence scores
+- Applies confidence thresholds to filter low-quality extractions
+- Handles various data types (strings, lists, etc.)
+
+### 4. Database Integration
+
+The application connects to a SQLite database containing:
+- `conversations` table with conversation text and metadata
+- `conversation_attributes` table with intent classifications
+
+### 5. Error Handling and Resilience
+
+Robust error handling throughout:
+- Retry mechanisms for API failures
+- Graceful degradation when components fail
+- Detailed logging for debugging
+- Partial results handling when some conversations fail
+
+### 6. Data Flow Architecture
+
+The data flows through the system as follows:
+
+1. User questions → Required attributes
+2. Database → Matching intents → Relevant conversations
+3. Conversations → Extracted attributes → Consolidated statistics
+4. Statistics + Insights → Analysis results
+5. Results → Web interface
+
+## Technical Implementation Details
+
+### LLM Integration
+
+The system uses Google's Gemini API (accessed via environment variable `GEMINI_API_KEY`) with:
+- Structured prompting techniques
+- JSON response parsing
+- Expected format validation
+- Confidence scoring
+
+### Parallel Processing
+
+The `process_in_batches()` method implements efficient parallel processing:
+- Divides work into manageable batches
+- Processes batches concurrently with controlled parallelism
+- Aggregates results from all batches
+
+### Semantic Consolidation Algorithm
+
+The label consolidation process:
+1. Collects all unique values with their frequencies
+2. Prompts LLM to identify canonical categories
+3. Maps each raw value to its canonical form
+4. Applies the mapping to normalize all values
+
+### Key Attribute Identification
+
+The `identify_key_attributes()` method:
+1. Analyzes research questions against available attributes
+2. Scores each attribute's relevance to the questions
+3. Selects the top N most relevant attributes
+4. Provides rationale for each selection
+
+### Data Gap Resolution
+
+The gap resolution process:
+1. Identifies missing or underrepresented data points
+2. Infers values based on existing data
+3. Enhances the dataset with inferred values
+4. Recompiles statistics with the enhanced dataset
+
+## System Requirements and Dependencies
+
+- Python 3.8+
+- Flask and Flask-SocketIO for web interface
+- SQLite for data storage
+- Matplotlib and Seaborn for visualizations
+- Google Gemini API for LLM capabilities
+- Asyncio for asynchronous processing
+
+## Performance Considerations
+
+- Batch processing to optimize API usage
+- Caching of analysis results
+- Non-blocking asynchronous processing for web responsiveness
+- Configurable sample sizes and batch sizes for performance tuning 

@@ -1,0 +1,67 @@
+# Deep Researcher for Contact Centers: Application Summary
+
+## Overview
+
+The Deep Researcher for Contact Centers is a web application that helps customer service teams analyze fee dispute conversations to uncover patterns, trends, and insights. The tool uses advanced AI techniques to process customer service transcripts, identify key themes, and answer specific research questions.
+
+## How It Works
+
+### User Experience
+
+1. **Research Question Input**: Users start by entering their research questions. For example:
+   - What are the most common types of fee disputes customers call about?
+   - How often do agents offer refunds or credits to resolve fee disputes?
+   - What percentage of fee disputes are resolved in the customer's favor?
+
+2. **Analysis Process**: After submitting questions, the application:
+   - Shows a progress indicator with real-time updates
+   - Processes conversations from a database
+   - Analyzes the content using AI
+   - Generates comprehensive insights
+
+3. **Results Display**: The results page presents:
+   - Direct answers to each research question with confidence levels
+   - Key metrics relevant to each question
+   - Identified data gaps that might affect analysis quality
+   - Detailed breakdowns of important attributes with statistics and visualizations
+
+### Technical Process
+
+The application follows a 12-step analysis pipeline:
+
+1. **Question Analysis**: Determines what specific data attributes are needed to answer the research questions
+2. **Intent Matching**: Finds conversations related to fee disputes in the database
+3. **Conversation Sampling**: Selects a representative sample of conversations for analysis
+4. **Attribute Extraction**: Analyzes each conversation to extract relevant attributes (dispute type, resolution method, etc.)
+5. **Statistical Compilation**: Compiles frequency statistics for each attribute
+6. **Semantic Consolidation**: Groups similar values to create meaningful categories
+7. **Enhanced Statistics**: Recalculates statistics with improved categorization
+8. **Detailed Insight Extraction**: Identifies patterns beyond simple frequency counts
+9. **Question Answering**: Generates direct answers to the research questions
+10. **Relationship Analysis**: Examines connections between different attributes
+11. **Gap Resolution**: Identifies and addresses data gaps
+12. **Final Analysis**: Produces the complete analysis with all insights
+
+## Key Technologies
+
+The application leverages several advanced techniques:
+
+1. **Natural Language Processing**: Understands the content and context of customer conversations
+2. **Semantic Categorization**: Groups similar concepts even when expressed differently
+3. **Attribute Extraction**: Identifies specific pieces of information from unstructured text
+4. **Cross-Attribute Analysis**: Discovers relationships between different data points
+5. **Confidence Scoring**: Provides transparency about the reliability of insights
+6. **Data Gap Identification**: Proactively identifies limitations in the analysis
+
+## Business Value
+
+This tool helps contact center teams:
+
+- Understand common customer pain points related to fees
+- Identify effective resolution strategies
+- Measure the effectiveness of different approaches
+- Discover training opportunities for agents
+- Make data-driven decisions about fee policies
+- Improve customer satisfaction by addressing root causes
+
+The application bridges the gap between raw conversation data and actionable business insights, making it possible to analyze thousands of customer interactions without manual review of each transcript. 
