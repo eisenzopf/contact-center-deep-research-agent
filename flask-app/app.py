@@ -63,10 +63,20 @@ def patch_rate_limiting():
         # Get the original _generate_content method
         original_generate_content = BaseAnalyzer._generate_content
         
-        # Define a patched version that handles rate limiting errors
+        # Define a patched version that handles rate limiting errors and logs inputs/outputs
         async def patched_generate_content(self, prompt, **kwargs):
+            # Log the input prompt when debug is enabled
+            if self.debug:
+                logger.debug(f"LLM INPUT:\n{prompt}")
+            
             try:
-                return await original_generate_content(self, prompt, **kwargs)
+                result = await original_generate_content(self, prompt, **kwargs)
+                
+                # Log the output when debug is enabled
+                if self.debug:
+                    logger.debug(f"LLM OUTPUT:\n{result}")
+                
+                return result
             except KeyError as e:
                 # If it's a rate limiting bucket error, initialize the bucket and retry
                 if str(e).isdigit() or str(e).startswith("'") and str(e)[1:-1].isdigit():
@@ -74,7 +84,13 @@ def patch_rate_limiting():
                     # Initialize the bucket in the LLM instance
                     self.llm.buckets[int(str(e).strip("'"))] = 0
                     # Retry the request
-                    return await original_generate_content(self, prompt, **kwargs)
+                    result = await original_generate_content(self, prompt, **kwargs)
+                    
+                    # Log the output after retry when debug is enabled
+                    if self.debug:
+                        logger.debug(f"LLM OUTPUT (after retry):\n{result}")
+                    
+                    return result
                 else:
                     # Re-raise other KeyErrors
                     raise
@@ -170,9 +186,12 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
             # Parse questions into a list
             question_list = [q.strip() for q in questions.split('\n') if q.strip()]
             
+            # Get debug flag from app config
+            debug_mode = app.config.get('DEBUG', False)
+            
             # Step 1: Get required attributes
             emit_progress("Step 1/12: Analyzing questions to determine required attributes...")
-            required_attributes = await get_required_attributes(question_list, api_key, False)
+            required_attributes = await get_required_attributes(question_list, api_key, debug_mode)
             
             # Deduplicate required attributes by field_name
             unique_attributes = {}
@@ -190,7 +209,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 db_path=db_path,
                 api_key=api_key,
                 target_class="fee dispute",
-                debug=False
+                debug=debug_mode
             )
             
             if not matching_intents:
@@ -217,7 +236,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 conversations,
                 required_attributes,
                 api_key,
-                False,
+                debug_mode,
                 batch_size=batch_size
             )
             
@@ -226,7 +245,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
             statistics = await compile_attribute_statistics(
                 attribute_results=attribute_results,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             # Step 6: Improve attribute consolidation
@@ -235,7 +254,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 attribute_results=attribute_results,
                 statistics=statistics,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             # Step 7: Recompile statistics after consolidation
@@ -243,7 +262,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
             statistics = await compile_attribute_statistics(
                 attribute_results=attribute_results,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             # Step 8: Extract detailed insights from attribute values
@@ -253,7 +272,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 required_attributes=required_attributes,
                 questions=question_list,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             # Step 9: Analyze the findings to answer research questions
@@ -262,7 +281,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 statistics=statistics,
                 questions=question_list,
                 api_key=api_key,
-                debug=False,
+                debug=debug_mode,
                 detailed_insights=detailed_insights
             )
             
@@ -272,7 +291,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 statistics=statistics,
                 attribute_results=attribute_results,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             if relationships:
@@ -284,7 +303,7 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
                 analysis=analysis,
                 attribute_results=attribute_results,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             # Step 12: Recompile statistics and re-analyze with enhanced data
@@ -292,14 +311,14 @@ def run_async_analysis(analysis_id, questions, db_path, sample_size=100, batch_s
             enhanced_statistics = await compile_attribute_statistics(
                 attribute_results=enhanced_attribute_results,
                 api_key=api_key,
-                debug=False
+                debug=debug_mode
             )
             
             enhanced_analysis = await analyze_attribute_findings(
                 statistics=enhanced_statistics,
                 questions=question_list,
                 api_key=api_key,
-                debug=False,
+                debug=debug_mode,
                 detailed_insights=detailed_insights
             )
             
@@ -445,9 +464,17 @@ async def refine_analysis_results(analysis, statistics, api_key, debug=False):
                 Explanation of Increased Confidence: [Why the revised answer deserves higher confidence]
                 """
                 
+                # Log the prompt if debug is enabled
+                if debug:
+                    logger.debug(f"LLM INPUT (refine_analysis):\n{prompt}")
+                
                 # Generate a refined answer
                 try:
                     result = await generator._generate_content(prompt)
+                    
+                    # Log the result if debug is enabled
+                    if debug:
+                        logger.debug(f"LLM OUTPUT (refine_analysis):\n{result}")
                     
                     # Process the text response
                     result_str = result if isinstance(result, str) else str(result)
@@ -523,9 +550,17 @@ async def validate_and_boost_confidence(analysis, statistics, api_key, debug=Fal
                 Confidence: [High/Medium/Low] ([0.0-1.0])
                 """
                 
+                # Log the prompt if debug is enabled
+                if debug:
+                    logger.debug(f"LLM INPUT (validate_confidence):\n{prompt}")
+                
                 # Generate a validation
                 try:
                     result = await generator._generate_content(prompt)
+                    
+                    # Log the result if debug is enabled
+                    if debug:
+                        logger.debug(f"LLM OUTPUT (validate_confidence):\n{result}")
                     
                     # Process the text response
                     result_str = result if isinstance(result, str) else str(result)

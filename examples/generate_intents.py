@@ -70,7 +70,7 @@ async def process_conversations_without_intent(db_path, api_key, test_mode=False
     error_count = 0
     
     # Process in smaller batches to show progress
-    batch_size = 50
+    batch_size = 100
     for i in range(0, len(formatted_conversations), batch_size):
         batch = formatted_conversations[i:i + batch_size]
         
